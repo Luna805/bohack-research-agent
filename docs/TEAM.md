@@ -24,7 +24,7 @@
 |---|---|---|
 | A | `budgetlab/proposers.py`、`tests/test_llm_http.py`、各配置文件里的 `llm:` 段 | `budgetlab/agents/`（协议理解 `protocol_agent.py`）、`budgetlab/qa/agent.py`（问答 Agent）、`tests/test_agent_*.py`、`tests/test_qa_agent.py`、`configs/llm-*.yaml` |
 | B | `controller.py`、`state.py`、`budget.py`、`evaluator.py`、`schemas.py`、`contracts.py`、`runner.py`、`worker.py`、`pipeline.py`、`search.py`、`ledger.py`、`provenance.py`、`cli.py`、`tests/conftest.py` 及对应测试；**`pyproject.toml`、`uv.lock`、`.github/`** | `budgetlab/memory/`（经验库，P1）、`tests/test_engine_*.py` |
-| C | `budgetlab/tasks/`（含场景卡）、`data.py`、`profile.py`、`budgetlab/evaluation/`、`configs/bank_marketing.yaml` 中除 `llm:` 外的部分 | `budgetlab/benchmark.py`、`budgetlab/tasks/csv_task.py`（通用 CSV 适配器）、`configs/benchmark/`、`results/`、`data/uploads/`（不入库）、`tests/test_benchmark*.py`、`tests/test_csv_task.py` |
+| C | `budgetlab/tasks/`（含场景卡）、`data.py`、`profile.py`、`budgetlab/evaluation/`、`configs/bank_marketing.yaml` 中除 `llm:` 外的部分 | `budgetlab/benchmark.py`、`budgetlab/tasks/csv_task.py`（通用 CSV 适配器）、`examples/`（演示数据与标准答案）、`configs/benchmark/`、`results/`、`data/uploads/`（不入库）、`tests/test_benchmark*.py`、`tests/test_csv_task.py` |
 | D | `reporting.py`、`README.md` | `budgetlab/ui/`（页面、后台启动器、步骤卡片）、`budgetlab/qa/evidence.py`、`budgetlab/qa/faq.py`、`ui_state/`（不入库）、`docs/presentation/`、`slides/`、`tests/test_ui*.py`、`tests/test_qa_faq.py` |
 | 协调人 | `docs/HANDOFF.md`、`docs/TEAM.md`、`docs/INTERFACES.md`、`AGENTS.md` | — |
 

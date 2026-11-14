@@ -1,0 +1,66 @@
+{
+  "adult/r1/budgetlab": {
+    "ci95": [
+      -0.003864480291914452,
+      0.0052403806711778704
+    ],
+    "delta": 0.0008338368820610675,
+    "identical_predictions": false,
+    "metric": "f1_macro",
+    "reference_run_id": "20261114T052204Z-random_search-5faa61",
+    "repeat": 1,
+    "resamples": 1000,
+    "rows": 9769,
+    "run_id": "20261114T052701Z-budgetlab-06d3fa",
+    "seed": 20261114,
+    "share_positive": 0.623
+  },
+  "adult/r1/budgetlab_no_schedule": {
+    "ci95": [
+      -0.029056343803576957,
+      -0.011109828386992671
+    ],
+    "delta": -0.02016562933785293,
+    "identical_predictions": false,
+    "metric": "f1_macro",
+    "reference_run_id": "20261114T052204Z-random_search-5faa61",
+    "repeat": 1,
+    "resamples": 1000,
+    "rows": 9769,
+    "run_id": "20261114T052448Z-budgetlab_no_schedule-12c3c5",
+    "seed": 20261114,
+    "share_positive": 0.0
+  },
+  "bank_marketing/r1/budgetlab": {
+    "ci95": [
+      0.0,
+      0.0
+    ],
+    "delta": 0.0,
+    "identical_predictions": true,
+    "metric": "f1_macro",
+    "reference_run_id": "20261114T051756Z-random_search-1aa95f",
+    "repeat": 1,
+    "resamples": 1000,
+    "rows": 8238,
+    "run_id": "20261114T052041Z-budgetlab-382a00",
+    "seed": 20261114,
+    "share_positive": 0.0
+  },
+  "bank_marketing/r1/budgetlab_no_schedule": {
+    "ci95": [
+      0.0,
+      0.0
+    ],
+    "delta": 0.0,
+    "identical_predictions": true,
+    "metric": "f1_macro",
+    "reference_run_id": "20261114T051756Z-random_search-1aa95f",
+    "repeat": 1,
+    "resamples": 1000,
+    "rows": 8238,
+    "run_id": "20261114T051932Z-budgetlab_no_schedule-aba244",
+    "seed": 20261114,
+    "share_positive": 0.0
+  }
+}

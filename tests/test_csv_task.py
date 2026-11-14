@@ -164,3 +164,23 @@ def test_card_level_rejections_are_reported_together(tmp_path, monkeypatch) -> N
 def test_unknown_upload_id_is_a_clear_error() -> None:
     with pytest.raises(ValueError, match="not found"):
         get_task("upload-0000000000")
+
+
+def test_demo_upload_and_answer_key_register_offline(tmp_path) -> None:
+    import yaml
+
+    from budgetlab.tasks import PROJECT_ROOT, approved_features
+
+    folder = PROJECT_ROOT / "examples" / "student_risk"
+    csv_path = folder / "student_risk.csv"
+    card = yaml.safe_load((folder / "card.yaml").read_text(encoding="utf-8"))
+    assert validate_csv_for_task(csv_path, "final_result") == []
+    task_id = register_csv_task(csv_path, card, tmp_path / "data")
+    task = get_task(task_id)
+    columns = [c for c in read_csv_any(csv_path).columns if c != "final_result"]
+    excluded = set(columns) - set(approved_features(task.card, columns))
+    assert excluded == {"G1", "G2", "G3", "absences"}
+    prepare_task(task_id, tmp_path / "data")
+    bundle = load_development(task_id, tmp_path / "data")
+    assert set(bundle.target.unique()) == {0, 1}
+    assert bundle.target.mean() == pytest.approx(100 / 649, abs=0.02)  # 1 = "fail"

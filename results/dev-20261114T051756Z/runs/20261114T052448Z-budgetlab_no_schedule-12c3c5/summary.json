@@ -1,0 +1,896 @@
+{
+  "baseline_score": 0.7792262327073238,
+  "budget": {
+    "limits": {
+      "experiment_timeout_seconds": 120,
+      "max_cost_usd": null,
+      "max_empty_proposal_rounds": 2,
+      "max_experiments": 40,
+      "max_fits": 200,
+      "max_llm_requests": 0,
+      "max_llm_tokens": 0,
+      "max_repairs_per_spec": 1,
+      "max_tool_search_fits": 30,
+      "max_total_seconds": 1800
+    },
+    "reservations": {
+      "train:baseline": {
+        "action_id": "train:baseline",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5807849999982864
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:calibration-11": {
+        "action_id": "train:calibration-11",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.549856749996252
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:calibration-23": {
+        "action_id": "train:calibration-23",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.560382457995729
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:calibration-37": {
+        "action_id": "train:calibration-37",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5542216250032652
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:calibration-53": {
+        "action_id": "train:calibration-53",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5544239169976208
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:calibration-71": {
+        "action_id": "train:calibration-71",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5471812909963774
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:confirm-baseline-137": {
+        "action_id": "train:confirm-baseline-137",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5394424159967457
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:confirm-baseline-2026": {
+        "action_id": "train:confirm-baseline-2026",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5403462079993915
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:confirm-baseline-31415": {
+        "action_id": "train:confirm-baseline-31415",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5459551669991924
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:confirm-candidate-137": {
+        "action_id": "train:confirm-candidate-137",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 19.63288291599747
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:confirm-candidate-2026": {
+        "action_id": "train:confirm-candidate-2026",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 19.367769374999625
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:confirm-candidate-31415": {
+        "action_id": "train:confirm-candidate-31415",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 19.46999766600493
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:final-refit": {
+        "action_id": "train:final-refit",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 1,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 5.216268000003765
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 1,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:r01-c1": {
+        "action_id": "train:r01-c1",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 7.3411239169945475
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:r01-c2": {
+        "action_id": "train:r01-c2",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 1.5727324159961427
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:r02-c1": {
+        "action_id": "train:r02-c1",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 10.470264790994406
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:r02-c2": {
+        "action_id": "train:r02-c2",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 6.752634042000864
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:r03-c1": {
+        "action_id": "train:r03-c1",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 19.272019916999852
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      },
+      "train:r03-c2": {
+        "action_id": "train:r03-c2",
+        "actual": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 10.101092332995904
+        },
+        "planned": {
+          "cost_usd": 0.0,
+          "experiments": 1,
+          "fits": 5,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 120.0
+        },
+        "status": "settled",
+        "unknown": {
+          "cost_usd": 0.0,
+          "experiments": 0,
+          "fits": 0,
+          "llm_requests": 0,
+          "llm_tokens": 0,
+          "seconds": 0.0
+        }
+      }
+    },
+    "reserved": {
+      "cost_usd": 0.0,
+      "experiments": 0,
+      "fits": 0,
+      "llm_requests": 0,
+      "llm_tokens": 0,
+      "seconds": 0.0
+    },
+    "tail_reserve": {
+      "cost_usd": 0.0,
+      "experiments": 0,
+      "fits": 0,
+      "llm_requests": 0,
+      "llm_tokens": 0,
+      "seconds": 0.0
+    },
+    "unknown": {
+      "cost_usd": 0.0,
+      "experiments": 0,
+      "fits": 0,
+      "llm_requests": 0,
+      "llm_tokens": 0,
+      "seconds": 0.0
+    },
+    "used": {
+      "cost_usd": 0.0,
+      "experiments": 19,
+      "fits": 91,
+      "llm_requests": 0,
+      "llm_tokens": 0,
+      "seconds": 133.16938020497037
+    }
+  },
+  "code_version": "e053b73",
+  "confirmation_deltas": [
+    0.017025299906224277,
+    0.017339950548134177,
+    0.015353423170468816
+  ],
+  "confirmation_status": "confirmed_pass",
+  "counts": {
+    "direction_changes": {
+      "agent": 0,
+      "error": 0,
+      "rule": 0
+    },
+    "duplicates_blocked": 0,
+    "empty_rounds": 2,
+    "experiments": 6,
+    "failed_experiments": 0,
+    "hypothesis_verdicts": {
+      "candidate_pass": 2,
+      "not_met": 4
+    },
+    "invalid_rejected": 0,
+    "passed_vs_baseline": 4,
+    "proposer_experiments": 6,
+    "rounds": 5,
+    "tool_search_experiments": 0
+  },
+  "delivered_dev_score": 0.7970622313112227,
+  "delivered_experiment_id": "r03-c1",
+  "delivered_spec_hash": "37c09dd3da68ec4f624a7ce3fdada9d143baf9dcb499dcec812420c4932c24df",
+  "experiments": [
+    {
+      "baseline_verdict": null,
+      "delta_vs_baseline": null,
+      "delta_vs_previous_best": null,
+      "fold_std": 0.0051,
+      "id": "baseline",
+      "mean_score": 0.7792,
+      "origin": "baseline",
+      "round": 0,
+      "seconds": 1.6,
+      "spec": {
+        "model": {
+          "c": 1.0,
+          "family": "logistic_regression",
+          "max_iter": 500
+        },
+        "preprocessing": {
+          "numeric_scaler": "standard"
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "baseline_verdict": "candidate_pass",
+      "delta_vs_baseline": 0.0028,
+      "delta_vs_hypothesis_comparator": 0.0028,
+      "delta_vs_previous_best": 0.0028,
+      "fold_std": 0.0035,
+      "hypothesis": "A random_forest model may capture structure the current best misses.",
+      "hypothesis_comparator": "baseline",
+      "hypothesis_verdict": "candidate_pass",
+      "id": "r01-c1",
+      "mean_score": 0.782,
+      "origin": "proposer",
+      "round": 1,
+      "seconds": 7.3,
+      "spec": {
+        "model": {
+          "class_weight": "balanced",
+          "family": "random_forest",
+          "min_samples_leaf": 5,
+          "n_estimators": 100
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "baseline_verdict": "not_met",
+      "delta_vs_baseline": -0.0104,
+      "delta_vs_hypothesis_comparator": -0.0104,
+      "delta_vs_previous_best": -0.0132,
+      "fold_std": 0.0039,
+      "hypothesis": "Balanced class weights should raise minority-class F1 on an imbalanced task.",
+      "hypothesis_comparator": "baseline",
+      "hypothesis_verdict": "not_met",
+      "id": "r01-c2",
+      "mean_score": 0.7688,
+      "origin": "proposer",
+      "round": 1,
+      "seconds": 1.6,
+      "spec": {
+        "model": {
+          "c": 1.0,
+          "class_weight": "balanced",
+          "family": "logistic_regression",
+          "max_iter": 500
+        },
+        "preprocessing": {
+          "numeric_scaler": "standard"
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "baseline_verdict": "candidate_pass",
+      "delta_vs_baseline": 0.0166,
+      "delta_vs_hypothesis_comparator": 0.0138,
+      "delta_vs_previous_best": 0.0138,
+      "fold_std": 0.0028,
+      "hypothesis": "A hist_gradient_boosting model may capture structure the current best misses.",
+      "hypothesis_comparator": "r01-c1",
+      "hypothesis_verdict": "candidate_pass",
+      "id": "r02-c1",
+      "mean_score": 0.7958,
+      "origin": "proposer",
+      "round": 2,
+      "seconds": 10.5,
+      "spec": {
+        "model": {
+          "class_weight": "balanced",
+          "family": "hist_gradient_boosting",
+          "learning_rate": 0.1,
+          "max_iter": 100,
+          "max_leaf_nodes": 31,
+          "min_samples_leaf": 20
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "baseline_verdict": "not_met",
+      "delta_vs_baseline": -0.004,
+      "delta_vs_hypothesis_comparator": -0.0068,
+      "delta_vs_previous_best": -0.0206,
+      "fold_std": 0.0035,
+      "hypothesis": "Tuning min_samples_leaf may trade bias and variance better.",
+      "hypothesis_comparator": "r01-c1",
+      "hypothesis_verdict": "not_met",
+      "id": "r02-c2",
+      "mean_score": 0.7752,
+      "origin": "proposer",
+      "round": 2,
+      "seconds": 6.8,
+      "spec": {
+        "model": {
+          "class_weight": "balanced",
+          "family": "random_forest",
+          "min_samples_leaf": 10,
+          "n_estimators": 100
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "baseline_verdict": "candidate_pass",
+      "delta_vs_baseline": 0.0178,
+      "delta_vs_hypothesis_comparator": 0.0012,
+      "delta_vs_previous_best": 0.0012,
+      "fold_std": 0.0025,
+      "hypothesis": "Tuning learning_rate, max_iter may trade bias and variance better.",
+      "hypothesis_comparator": "r02-c1",
+      "hypothesis_verdict": "not_met",
+      "id": "r03-c1",
+      "mean_score": 0.7971,
+      "origin": "proposer",
+      "round": 3,
+      "seconds": 19.3,
+      "spec": {
+        "model": {
+          "class_weight": "balanced",
+          "family": "hist_gradient_boosting",
+          "learning_rate": 0.05,
+          "max_iter": 200,
+          "max_leaf_nodes": 31,
+          "min_samples_leaf": 20
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "baseline_verdict": "candidate_pass",
+      "delta_vs_baseline": 0.0162,
+      "delta_vs_hypothesis_comparator": -0.0004,
+      "delta_vs_previous_best": -0.0016,
+      "fold_std": 0.004,
+      "hypothesis": "Tuning min_samples_leaf may trade bias and variance better.",
+      "hypothesis_comparator": "r02-c1",
+      "hypothesis_verdict": "not_met",
+      "id": "r03-c2",
+      "mean_score": 0.7954,
+      "origin": "proposer",
+      "round": 3,
+      "seconds": 10.1,
+      "spec": {
+        "model": {
+          "class_weight": "balanced",
+          "family": "hist_gradient_boosting",
+          "learning_rate": 0.1,
+          "max_iter": 100,
+          "max_leaf_nodes": 31,
+          "min_samples_leaf": 50
+        }
+      },
+      "status": "ok"
+    }
+  ],
+  "exploration_best_id": "r03-c1",
+  "exploration_best_score": 0.7970622313112227,
+  "finalist_id": "r03-c1",
+  "git": {
+    "branch": "main",
+    "commit": "e053b7354d7a89023f65525e243bc39e05a7fc16",
+    "dirty": false,
+    "dirty_files": [],
+    "short": "e053b73"
+  },
+  "llm": {
+    "by_role": {
+      "proposer": {
+        "calls": 5,
+        "input_tokens": 0,
+        "output_tokens": 0
+      }
+    },
+    "calls": 5,
+    "cost_usd": 0.0,
+    "requests": 0,
+    "tokens": 0,
+    "unknown": {
+      "cost_usd": 0.0,
+      "experiments": 0,
+      "fits": 0,
+      "llm_requests": 0,
+      "llm_tokens": 0,
+      "seconds": 0.0
+    }
+  },
+  "min_effect": 0.002,
+  "model_ref": "delivery/model.joblib",
+  "primary_metric": "f1_macro",
+  "proposal_source": "scripted",
+  "run_id": "20261114T052448Z-budgetlab_no_schedule-12c3c5",
+  "stop_reason": "no_valid_candidates",
+  "summary_version": 1,
+  "system": "budgetlab_no_schedule",
+  "task_id": "adult",
+  "trajectory": [
+    {
+      "best_score_after": 0.7792262327073238,
+      "elapsed_seconds": 9.62,
+      "experiment_id": "baseline",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7792262327073238,
+      "origin": "baseline",
+      "round": 0
+    },
+    {
+      "best_score_after": 0.7819896397639801,
+      "elapsed_seconds": 16.97,
+      "experiment_id": "r01-c1",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7819896397639801,
+      "origin": "proposer",
+      "round": 1
+    },
+    {
+      "best_score_after": 0.7819896397639801,
+      "elapsed_seconds": 18.54,
+      "experiment_id": "r01-c2",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7687984233459921,
+      "origin": "proposer",
+      "round": 1
+    },
+    {
+      "best_score_after": 0.7958205405694649,
+      "elapsed_seconds": 29.02,
+      "experiment_id": "r02-c1",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7958205405694649,
+      "origin": "proposer",
+      "round": 2
+    },
+    {
+      "best_score_after": 0.7958205405694649,
+      "elapsed_seconds": 35.77,
+      "experiment_id": "r02-c2",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7752242975489612,
+      "origin": "proposer",
+      "round": 2
+    },
+    {
+      "best_score_after": 0.7970622313112227,
+      "elapsed_seconds": 55.05,
+      "experiment_id": "r03-c1",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7970622313112227,
+      "origin": "proposer",
+      "round": 3
+    },
+    {
+      "best_score_after": 0.7970622313112227,
+      "elapsed_seconds": 65.15,
+      "experiment_id": "r03-c2",
+      "llm_tokens_so_far": 0,
+      "mean_score": 0.7954385939042375,
+      "origin": "proposer",
+      "round": 3
+    }
+  ],
+  "wall_seconds": 133.49
+}

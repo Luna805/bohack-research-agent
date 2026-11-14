@@ -1,0 +1,79 @@
+# Answer key / confirmed protocol for the demo upload (role C).
+# Same format as the scenario cards (docs/INTERFACES.md section 4) and accepted as-is by
+# budgetlab.tasks.csv_task.register_csv_task. The protocol agent (role A) never sees this file;
+# it is the reference its DraftProtocol is scored against.
+title: Early warning for failing the Portuguese course
+source: >-
+  UCI Machine Learning Repository, Student Performance (Cortez and Silva 2008), student-por.csv,
+  CC BY 4.0. Two Portuguese secondary schools, school year 2005-2006.
+business_question: >-
+  At the start of the school year, find the students likely to fail the Portuguese course so
+  that tutoring can be arranged early.
+prediction_time: at the start of the school year, before any period grade of this course is given
+decision_use: assign extra tutoring; missing a failing student is worse than tutoring one who would pass
+error_costs: >-
+  Both errors matter and the failing class is only about 15%, so the frozen metric is macro-F1.
+entity: one row per student enrolled in the Portuguese course
+deployment_data: next year's enrolment records from the same schools
+primary_metric: f1_macro
+target:
+  column: final_result
+  positive_label: fail
+  description: '"fail" if the final grade G3 is below 10 on the 0-20 scale, else "pass"'
+fields:
+  - {name: school, type: categorical, availability: available, description: school (GP or MS)}
+  - {name: sex, type: categorical, availability: available, description: student's sex}
+  - {name: age, type: numeric, availability: available, description: age in years}
+  - {name: address, type: categorical, availability: available, description: urban or rural home}
+  - {name: famsize, type: categorical, availability: available, description: family size}
+  - {name: Pstatus, type: categorical, availability: available, description: parents living together or apart}
+  - {name: Medu, type: numeric, availability: available, description: mother's education (0-4)}
+  - {name: Fedu, type: numeric, availability: available, description: father's education (0-4)}
+  - {name: Mjob, type: categorical, availability: available, description: mother's job}
+  - {name: Fjob, type: categorical, availability: available, description: father's job}
+  - {name: reason, type: categorical, availability: available, description: reason for choosing the school}
+  - {name: guardian, type: categorical, availability: available, description: student's guardian}
+  - {name: traveltime, type: numeric, availability: available, description: home-to-school travel time (1-4)}
+  - {name: studytime, type: numeric, availability: available, description: weekly study time (1-4)}
+  - {name: failures, type: numeric, availability: available, description: number of past class failures}
+  - {name: schoolsup, type: categorical, availability: available, description: extra educational support}
+  - {name: famsup, type: categorical, availability: available, description: family educational support}
+  - {name: paid, type: categorical, availability: available, description: extra paid classes in the subject}
+  - {name: activities, type: categorical, availability: available, description: extra-curricular activities}
+  - {name: nursery, type: categorical, availability: available, description: attended nursery school}
+  - {name: higher, type: categorical, availability: available, description: wants higher education}
+  - {name: internet, type: categorical, availability: available, description: internet access at home}
+  - {name: romantic, type: categorical, availability: available, description: in a romantic relationship}
+  - {name: famrel, type: numeric, availability: available, description: quality of family relationships (1-5)}
+  - {name: freetime, type: numeric, availability: available, description: free time after school (1-5)}
+  - {name: goout, type: numeric, availability: available, description: going out with friends (1-5)}
+  - {name: Dalc, type: numeric, availability: available, description: workday alcohol consumption (1-5)}
+  - {name: Walc, type: numeric, availability: available, description: weekend alcohol consumption (1-5)}
+  - {name: health, type: numeric, availability: available, description: current health status (1-5)}
+  - name: absences
+    type: numeric
+    availability: post_outcome
+    description: number of school absences
+    note: >-
+      Counted over the school year being predicted, so it is not known at the start of the year.
+      Borderline case: if a previous-year count were meant it would be usable; the UCI
+      description does not say, so the key treats it as the current year.
+  - name: G1
+    type: numeric
+    availability: post_outcome
+    description: first period grade (0-20)
+    note: Given during the school year, after the prediction time; strongly predicts the final grade.
+  - name: G2
+    type: numeric
+    availability: post_outcome
+    description: second period grade (0-20)
+    note: Given during the school year, after the prediction time; strongly predicts the final grade.
+  - name: G3
+    type: numeric
+    availability: post_outcome
+    description: final grade (0-20)
+    note: The final grade itself; the target is computed from it.
+known_limitations:
+  - Small data (649 students, about 100 failing); holdout scores have wide intervals.
+  - Two schools in one country and year; not representative of other education systems.
+  - sex is a protected attribute and kept as in the source data.

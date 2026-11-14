@@ -273,6 +273,7 @@ class DraftProtocol(BaseModel):
 ```
 
 - 输入：一句话描述、列名、开发数据画像（`profile_development` 的输出，**不带可用性标注**）。不能把 holdout 传给它。
+- 打分用的标准答案：`examples/student_risk/card.yaml`（学生不及格预警，必须排除 G1、G2、G3，`absences` 是边界情况），以及内置任务的场景卡（Bank 必须排除 `duration`）。打分规则见 `examples/student_risk/README.md`。
 - 调用协议 Agent 时也要计量 Token，记录到 `ui_state/llm_calls.jsonl`，和研究预算分开。
 - 人确认（可以先修改）后，D 把最终结果转换成场景卡 dict（格式见第 4 节），交给 C 的 `register_csv_task`。草稿和最终版都保存在 `data/uploads/<task_id>/` 下：`draft_protocol.json`、`card.yaml`。
 - **兜底路径（没有 LLM）**：示例任务的 `DraftProtocol` 由 D 直接从已有场景卡转换而来，`questions_for_user` 为空，并标注 `source=card`；新上传的 CSV 生成一份所有字段都待人确认的空白草稿，标注 `source=manual`。正常由 Agent 生成的草稿标注 `source=llm`。因此 `DraftProtocol` 需要增加字段 `source: Literal["llm", "card", "manual"]`。

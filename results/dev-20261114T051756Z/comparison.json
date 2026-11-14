@@ -1,0 +1,193 @@
+{
+  "efficiency": [
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.04266989058659261,
+      "mean_dev_gain_over_baseline": 0.06854917922736103,
+      "mean_holdout": 0.7099104486403394,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 96.39,
+      "runs": 1,
+      "system": "random_search",
+      "task_id": "bank_marketing"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.059894433575675865,
+      "mean_dev_gain_over_baseline": 0.06854917922736103,
+      "mean_holdout": 0.7099104486403394,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 68.67,
+      "runs": 1,
+      "system": "budgetlab_no_schedule",
+      "task_id": "bank_marketing"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.04998117333383961,
+      "mean_dev_gain_over_baseline": 0.06854917922736103,
+      "mean_holdout": 0.7099104486403394,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 82.29,
+      "runs": 1,
+      "system": "budgetlab",
+      "task_id": "bank_marketing"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.013257972865116888,
+      "mean_dev_gain_over_baseline": 0.036214152881066775,
+      "mean_holdout": 0.814281630896051,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 163.89,
+      "runs": 1,
+      "system": "random_search",
+      "task_id": "adult"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.008016779655659077,
+      "mean_dev_gain_over_baseline": 0.01783599860389884,
+      "mean_holdout": 0.7941160015581981,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 133.49,
+      "runs": 1,
+      "system": "budgetlab_no_schedule",
+      "task_id": "adult"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.014346066713934248,
+      "mean_dev_gain_over_baseline": 0.03547782298355939,
+      "mean_holdout": 0.8151154677781121,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 148.38,
+      "runs": 1,
+      "system": "budgetlab",
+      "task_id": "adult"
+    }
+  ],
+  "paired": [
+    {
+      "delta_holdout_per_1k_tokens": null,
+      "holdout_ci_pairs": [
+        {
+          "ci95": [
+            0.0,
+            0.0
+          ],
+          "delta": 0.0,
+          "identical_predictions": true,
+          "repeat": 1,
+          "share_positive": 0.0
+        }
+      ],
+      "losses": 0,
+      "mean_delta_experiments": -10.0,
+      "mean_delta_fits": -50.0,
+      "mean_delta_holdout": 0.0,
+      "mean_delta_wall_seconds": -27.72,
+      "mean_llm_tokens": 0.0,
+      "pairs": 1,
+      "pairs_ci_above_zero": 0,
+      "pairs_ci_below_zero": 0,
+      "reference": "random_search",
+      "std_delta_holdout": null,
+      "system": "budgetlab_no_schedule",
+      "task_id": "bank_marketing",
+      "ties": 1,
+      "wins": 0
+    },
+    {
+      "delta_holdout_per_1k_tokens": null,
+      "holdout_ci_pairs": [
+        {
+          "ci95": [
+            0.0,
+            0.0
+          ],
+          "delta": 0.0,
+          "identical_predictions": true,
+          "repeat": 1,
+          "share_positive": 0.0
+        }
+      ],
+      "losses": 0,
+      "mean_delta_experiments": -6.0,
+      "mean_delta_fits": -30.0,
+      "mean_delta_holdout": 0.0,
+      "mean_delta_wall_seconds": -14.099999999999994,
+      "mean_llm_tokens": 0.0,
+      "pairs": 1,
+      "pairs_ci_above_zero": 0,
+      "pairs_ci_below_zero": 0,
+      "reference": "random_search",
+      "std_delta_holdout": null,
+      "system": "budgetlab",
+      "task_id": "bank_marketing",
+      "ties": 1,
+      "wins": 0
+    },
+    {
+      "delta_holdout_per_1k_tokens": null,
+      "holdout_ci_pairs": [
+        {
+          "ci95": [
+            -0.029056343803576957,
+            -0.011109828386992671
+          ],
+          "delta": -0.02016562933785293,
+          "identical_predictions": false,
+          "repeat": 1,
+          "share_positive": 0.0
+        }
+      ],
+      "losses": 1,
+      "mean_delta_experiments": -12.0,
+      "mean_delta_fits": -60.0,
+      "mean_delta_holdout": -0.02016562933785293,
+      "mean_delta_wall_seconds": -30.399999999999977,
+      "mean_llm_tokens": 0.0,
+      "pairs": 1,
+      "pairs_ci_above_zero": 0,
+      "pairs_ci_below_zero": 1,
+      "reference": "random_search",
+      "std_delta_holdout": null,
+      "system": "budgetlab_no_schedule",
+      "task_id": "adult",
+      "ties": 0,
+      "wins": 0
+    },
+    {
+      "delta_holdout_per_1k_tokens": null,
+      "holdout_ci_pairs": [
+        {
+          "ci95": [
+            -0.003864480291914452,
+            0.0052403806711778704
+          ],
+          "delta": 0.0008338368820610675,
+          "identical_predictions": false,
+          "repeat": 1,
+          "share_positive": 0.623
+        }
+      ],
+      "losses": 0,
+      "mean_delta_experiments": -10.0,
+      "mean_delta_fits": -50.0,
+      "mean_delta_holdout": 0.0008338368820610675,
+      "mean_delta_wall_seconds": -15.509999999999991,
+      "mean_llm_tokens": 0.0,
+      "pairs": 1,
+      "pairs_ci_above_zero": 0,
+      "pairs_ci_below_zero": 0,
+      "reference": "random_search",
+      "std_delta_holdout": null,
+      "system": "budgetlab",
+      "task_id": "adult",
+      "ties": 1,
+      "wins": 0
+    }
+  ],
+  "reference": "random_search"
+}
