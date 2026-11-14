@@ -106,7 +106,7 @@ def render_result_panel(run_dir: Path | None) -> None:
         st.echarts_chart(
             score_chart_spec(rows, summary.get("delivered_experiment_id")),
             height=240,
-            alt="各次实验的开发集分数，荧光绿点表示交付方案",
+            alt="各次实验的开发集分数，蓝点表示交付方案",
         )
         st.caption("开发集交叉验证 · 亮色为交付方案")
     st.markdown("##### 研究闭环")
@@ -125,12 +125,11 @@ def render_result_panel(run_dir: Path | None) -> None:
 
 
 def render_branch_map(run_dir: Path | None) -> None:
-    st.subheader("研究路径")
     with st.popover("图例与操作"):
-        st.write("荧光绿：最终交付；亮色：达到门槛；淡色：其他尝试。")
+        st.write("蓝色：最终交付；深灰：达到门槛；淡色：其他尝试。")
         st.write("悬停节点看结果，下方选择实验可看完整依据。")
     if run_dir is None:
-        st.info("选择左侧研究记录，或启动一次研究后查看分岔。")
+        st.info("打开一条研究记录，或启动一次研究后查看分岔。")
         return
     summary = read_json(run_dir / "summary.json")
     rows = experiment_rows(run_dir, summary)
@@ -141,7 +140,7 @@ def render_branch_map(run_dir: Path | None) -> None:
     st.echarts_chart(
         branch_chart_spec(tree),
         height=540,
-        alt="研究实验分岔，荧光绿节点为交付方案，蓝色节点为通过门槛的方案",
+        alt="研究实验分岔，蓝色节点为交付方案，深灰节点为通过门槛的方案",
     )
     chosen = st.selectbox(
         "查看节点说明",

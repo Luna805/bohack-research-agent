@@ -162,12 +162,12 @@ def branch_tree(rows: list[dict[str, Any]], delivered_id: str | None) -> dict[st
             if verdict == "candidate_pass"
             else "继续探索"
         )
-        color = "#B8FF65" if row["id"] == delivered_id else "#F4F7FB"
+        color = "#2563EB" if row["id"] == delivered_id else "#344054"
         nodes[row["id"]] = {
             "name": f"{family}{action}\n{outcome} · {row['id']}",
             "itemStyle": {
                 "color": color,
-                "borderColor": "#0B1018",
+                "borderColor": "#FFFFFF",
                 "opacity": 0.4 if verdict != "candidate_pass" and row["id"] != delivered_id else 1,
             },
             "children": [],
@@ -183,7 +183,7 @@ def branch_tree(rows: list[dict[str, Any]], delivered_id: str | None) -> dict[st
         seen.add(row["id"])
     if len(roots) == 1:
         return roots[0]
-    return {"name": "研究起点", "itemStyle": {"color": "#F4F7FB"}, "children": roots}
+    return {"name": "研究起点", "itemStyle": {"color": "#98A2B3"}, "children": roots}
 
 
 def branch_chart_spec(tree: dict[str, Any]) -> dict[str, Any]:
@@ -203,8 +203,8 @@ def branch_chart_spec(tree: dict[str, Any]) -> dict[str, Any]:
                 "roam": True,
                 "expandAndCollapse": True,
                 "initialTreeDepth": 5,
-                "lineStyle": {"color": "#F4F7FB", "opacity": 0.4, "width": 1},
-                "label": {"position": "top", "fontSize": 11, "color": "#F4F7FB"},
+                "lineStyle": {"color": "#98A2B3", "opacity": 0.8, "width": 1},
+                "label": {"position": "top", "fontSize": 11, "color": "#344054"},
                 "leaves": {"label": {"position": "bottom"}},
                 "animationDurationUpdate": 300,
             }
@@ -241,14 +241,14 @@ def score_chart_spec(rows: list[dict[str, Any]], delivered_id: str | None) -> di
     series: dict[str, Any] = {
         "type": "line",
         "encode": {"x": "实验", "y": "开发集分数"},
-        "lineStyle": {"color": "#F4F7FB", "width": 2},
-        "itemStyle": {"color": "#F4F7FB"},
+        "lineStyle": {"color": "#344054", "width": 2},
+        "itemStyle": {"color": "#344054"},
         "symbolSize": 7,
     }
     if delivered:
         series["markPoint"] = {
             "symbolSize": 45,
-            "itemStyle": {"color": "#B8FF65"},
+            "itemStyle": {"color": "#2563EB"},
             "data": [{"name": "交付", "coord": [delivered_id, delivered["score"]]}],
         }
     return {

@@ -60,7 +60,7 @@ def test_branch_tree_keeps_sibling_attempts_and_saved_scores(tmp_path):
     }
     assert (
         next(node for node in tree["children"] if "c1" in node["name"])["itemStyle"]["color"]
-        == "#B8FF65"
+        == "#2563EB"
     )
 
 

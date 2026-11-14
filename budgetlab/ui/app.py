@@ -1,6 +1,8 @@
-"""Chat-first, read-only presentation of a BudgetLab research run.
+"""Workbench page for one BudgetLab research: chat on the left, run files on the right.
 
-Start with ``streamlit run budgetlab/ui/app.py`` from the repository root.
+Start with ``streamlit run budgetlab/ui/app.py`` from the repository root. The page only reads
+run artifacts (and starts runs or the one-shot holdout through the CLI); numbers and verdicts
+come from the program, never from the page.
 """
 
 from __future__ import annotations
@@ -10,8 +12,12 @@ import json
 import os
 import subprocess
 import sys
+import time
+from datetime import datetime
+from functools import partial
 from importlib import import_module
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pandas as pd
 import streamlit as st
@@ -31,16 +37,28 @@ from budgetlab.tasks.csv_task import (
 )
 from budgetlab.ui.artifacts import (
     CURVE,
+    GROUPS,
     answer_links,
     curve_rows,
-    links_markdown,
     resolve_artifact,
     run_dir,
 )
-from budgetlab.ui.insights import cycle_status
-from budgetlab.ui.llm import llm_problem, llm_settings, log_call, research_config
-from budgetlab.ui.presentation import artifact_preview, event_card, load_matrix, trajectory_rows
-from budgetlab.ui.workspace import render_branch_map, render_result_panel, render_token_panel
+from budgetlab.ui.insights import read_json, token_ledger
+from budgetlab.ui.llm import llm_overrides, llm_problem, llm_settings, log_call, research_config
+from budgetlab.ui.presentation import artifact_preview, load_matrix, trajectory_rows
+from budgetlab.ui.workbench import (
+    MODEL_NAMES,
+    clock,
+    describe_spec,
+    experiment_table,
+    history_rows,
+    list_entries,
+    progress,
+    round_started_at,
+    size_text,
+    sort_entries,
+)
+from budgetlab.ui.workspace import render_branch_map
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
@@ -54,6 +72,14 @@ TASKS = {
 LLM_CALLS = ROOT / "ui_state" / "llm_calls.jsonl"
 QA_CALLS = ROOT / "ui_state" / "qa_calls.jsonl"
 QA_LIMITS = {"requests": 20, "tokens": 50_000}  # per page session (INTERFACES 8.4)
+WS_TABS = ["文件", "查看器", "研究路径", "得分曲线"]
+PANEL_TABS = ["实验", "Token", "验证"]
+EXAMPLES = {
+    "Bank Marketing": "电话营销：预测客户是否订阅定期存款",
+    "Adult Income": "人口普查：预测年收入是否超过 5 万美元",
+    "Breast Cancer (offline smoke)": "不用下载数据，适合断网时检查流程",
+}
+DEMO_CSV = ROOT / "examples" / "student_risk" / "student_risk.csv"
 
 
 def fmt(value: object, digits: int = 4) -> str:
@@ -166,100 +192,6 @@ def evaluate_run(run_id: str) -> str | None:
         check=False,
     )
     return result.stderr[-1000:] if result.returncode else None
-
-
-def show_timeline(cards: list[dict], run_dir: Path, *, key: str) -> None:
-    """Keep the story readable while leaving every raw event available."""
-    st.caption(f"{len(cards)} 条关键事件，按研究顺序记录。")
-    show_all = st.toggle("显示全部事件", key=f"all-events-{key}")
-    if show_all:
-        visible = cards
-    else:
-        first_by_stage = {}
-        for card in cards:
-            first_by_stage.setdefault(card["stage"], card)
-        selected = {card["seq"] for card in first_by_stage.values()}
-        selected.update(
-            card["seq"]
-            for card in cards
-            if card["raw"]["event_type"] in {"llm_call_completed", "llm_call_failed"}
-            or (
-                card["raw"]["event_type"] == "evaluation_recorded"
-                and (card["raw"].get("details") or {}).get("new_best")
-            )
-        )
-        selected.update(card["seq"] for card in cards[-4:])
-        visible = [card for card in cards if card["seq"] in selected]
-        if len(visible) < len(cards):
-            st.write("显示每个阶段的首个步骤、各轮提案、刷新最优分的裁决和最近 4 条事件。")
-    for card in visible:
-        with st.expander(f"{card['seq']}. {card['stage']} · {card['title']}"):
-            if card["note"]:
-                st.write(card["note"])
-            for line in artifact_preview(run_dir, card):
-                st.write(line)
-            st.caption(f"证据文件：{card['artifact'] or 'events.jsonl'}")
-            if show_all:
-                st.json(card["raw"])
-
-
-@st.fragment(run_every="2s")
-def show_side_progress(selected_run_dir: Path | None, history_selected: bool) -> None:
-    """Refresh the run evidence without making the conversation a wall of events."""
-    run_dir = selected_run_dir
-    if not history_selected and (job := st.session_state.get("job")):
-        run_dir = locate_run(job) or run_dir
-    st.markdown("#### 研究进度")
-    if run_dir is None:
-        st.caption("启动研究后显示六阶段进度。")
-        return
-    events = read_events(run_dir)
-    stages = cycle_status(events)
-    completed = sum(count > 0 for _, count in stages)
-    st.progress(completed / len(stages), text=f"已记录 {completed}/{len(stages)} 个阶段")
-    st.caption(" → ".join(label for label, count in stages if count))
-    cards = [card for event in events if (card := event_card(event))]
-    if st.toggle("查看关键步骤", key=f"progress-detail-{run_dir.name}"):
-        show_timeline(cards, run_dir, key=f"side-{run_dir.name}")
-
-
-@st.fragment(run_every="2s")
-def show_saved_run_map(run_dir: Path) -> None:
-    render_branch_map(run_dir)
-
-
-@st.fragment(run_every="2s")
-def show_side_results(selected_run_dir: Path | None, history_selected: bool) -> None:
-    run_dir = selected_run_dir
-    if not history_selected and (job := st.session_state.get("job")):
-        run_dir = locate_run(job) or run_dir
-    render_result_panel(run_dir)
-
-
-def show_evidence_links(run_id: str, evidence: list[dict], answer: str) -> None:
-    """Clickable run files behind an answer: cited experiments, the score curve, final results."""
-    links = answer_links(RUNS, run_id, evidence, answer)
-    if links:
-        with st.expander(f"相关文件（{len(links)} 个，点击在新标签页打开）", expanded=True):
-            st.markdown(links_markdown(run_id, links))
-            st.caption(f"文件都在 runs/{run_id}/ 下，由程序按引用和交付记录列出。")
-
-
-def show_quick_questions(run_id: str, *, key: str) -> None:
-    """Zero-token quick questions as light chips in one row; the chosen one is answered below."""
-    chosen = st.pills(
-        "快捷问题（不花 Token）",
-        list(QUICK_QUESTIONS),
-        format_func=QUICK_QUESTIONS.get,
-        key=key,
-        label_visibility="collapsed",
-    )
-    if chosen:
-        answer = answer_quick(chosen, run_id, STORE)
-        with st.chat_message("assistant"):
-            st.write(answer["answer"])
-            st.caption(f"证据：runs/{run_id}/summary.json · 0 Token")
-            show_evidence_links(run_id, answer["evidence"], answer["answer"])
 
 
 def reset_task_draft() -> None:
@@ -476,75 +408,6 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
             st.rerun()
 
 
-def finished_run_id() -> str | None:
-    job = st.session_state.get("job")
-    if job and job.get("run_id") and (RUNS / job["run_id"] / "summary.json").is_file():
-        return job["run_id"]
-    return None
-
-
-@st.fragment(run_every="2s")
-def show_active_run() -> None:
-    job = st.session_state.get("job")
-    if not job:
-        return
-    run_dir = locate_run(job)
-    if run_dir is None:
-        if job["process"].poll() is not None:
-            st.error("研究进程在创建 run 目录前退出。请查看 ui_state/research.log。")
-        else:
-            st.info("研究进程正在启动，页面会自动更新。")
-        return
-
-    events = read_events(run_dir)
-    st.caption(f"研究编号：{run_dir.name} · 已记录 {len(events)} 条事件")
-    render_branch_map(run_dir)
-    if not (run_dir / "summary.json").is_file():
-        if job["process"].poll() is None:
-            st.info("研究仍在进行；分岔图与侧栏进度每 2 秒自动更新。")
-        else:
-            st.error("研究进程已退出，但没有生成 summary.json；请查看运行日志。")
-        log_path = ROOT / "ui_state" / "research.log"
-        if log_path.is_file():
-            with st.expander("运行日志末尾"):
-                st.code(log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
-        return
-
-    if not job.get("finished_seen"):
-        # One full rerun so the side panels and the chat box switch to the finished state.
-        job["finished_seen"] = True
-        st.rerun()
-    summary = STORE.get_summary(run_dir.name)
-    with st.chat_message("assistant"):
-        st.write("### 研究结论")
-        st.write(
-            f"开发集：基线 {fmt(summary.get('baseline_score'))} → 交付模型 "
-            f"{fmt(summary.get('delivered_dev_score'))}（{summary.get('delivered_experiment_id')}）"
-        )
-        st.write(
-            f"确认状态：{summary.get('confirmation_status')}；"
-            f"代码版本：{summary.get('code_version')}"
-        )
-        llm = summary.get("llm") or {}
-        if summary.get("proposal_source") == "llm":
-            st.caption(
-                f"数值来自本次 run 的 summary.json；提案来自 LLM（{llm.get('requests', 0)} 次请求、"
-                f"{llm.get('tokens', 0):,} Token），裁决由程序计算。"
-            )
-        else:
-            st.caption("数值来自本次 run 的 summary.json；本次提案为脚本化，未使用 LLM。")
-        evaluation = STORE.get_final_evaluation(run_dir.name)
-        if evaluation:
-            st.write(holdout_text(evaluation))
-        elif st.button("运行一次 holdout 评测", key=f"evaluate-{run_dir.name}"):
-            if error := evaluate_run(run_dir.name):
-                st.error(error)
-            else:
-                st.rerun(scope="fragment")
-
-    show_quick_questions(run_dir.name, key=f"faq-{run_dir.name}")
-
-
 def ask_open_question(run_id: str, question: str, thread: list[dict]) -> dict:
     """One metered call to A's QA agent; numbers and citations are checked by code."""
     if not llm_on:
@@ -579,51 +442,25 @@ def ask_open_question(run_id: str, question: str, thread: list[dict]) -> dict:
     return {"question": question, **answer.model_dump(), "tokens": tokens}
 
 
-def show_open_qa(run_id: str) -> None:
-    thread = st.session_state.setdefault("qa_threads", {}).setdefault(run_id, [])
-    pending = st.session_state.pop("qa_pending", None)
-    if pending and pending[0] == run_id:
-        thread.append(ask_open_question(run_id, pending[1], thread))
-    for turn in thread:
-        with st.chat_message("user"):
-            st.write(turn["question"])
-        with st.chat_message("assistant"):
-            if turn.get("error"):
-                st.error(f"问答失败：{turn['error']}")
-                continue
-            if turn.get("note"):
-                st.info(turn["note"])
-                continue
-            st.write(turn["answer"])
-            verified = set(turn.get("verified_numbers", []))
-            if turn.get("numbers"):
-                marks = " ".join(
-                    f"{number} {'✅' if number in verified else '⚠️'}" for number in turn["numbers"]
-                )
-                st.caption(f"数字核对：{marks}（⚠️＝没在证据里找到原值）")
-            refs = [f"{ref['kind']}:{ref['ref_id']}" for ref in turn.get("evidence", [])]
-            cited = " · ".join(refs) if refs else "无可核对的引用"
-            st.caption(f"证据：{cited} · LLM {turn['tokens']:,} Token")
-            show_evidence_links(run_id, turn.get("evidence", []), turn["answer"])
-
+# ------------------------------------------------------------------------------ viewer
 
 VIEWER_TEXT_LIMIT = 50_000
 
 
-def show_score_curve(run_id: str) -> None:
-    """Each experiment's own development score and the best score so far, from summary.json."""
+def show_score_curve(run_id: str, summary: dict) -> None:
+    """Each experiment's own development score and the best score so far."""
     import altair as alt
 
-    summary = STORE.get_summary(run_id)
     rows = curve_rows(summary)
     metric = summary.get("primary_metric") or "score"
-    st.subheader(f"得分曲线（{metric}）")
+    st.markdown(f"**得分曲线（{metric}）**")
     st.caption(
         "开发集交叉验证分数，越高越好。圆点是每个实验自己的分数，阶梯线是截至该实验的最优分，"
-        "虚线是基线，菱形是最终交付的实验。数据来自 summary.json 的 trajectory。"
+        "虚线是基线，菱形是最终交付的实验。数据来自 summary.json 的 trajectory"
+        "（研究进行中时取自 experiments/ 里已完成的实验）。"
     )
     if not rows:
-        st.info("这次研究没有记录得分轨迹。")
+        st.info("还没有完成的实验，暂时画不出得分曲线。")
         return
     frame = pd.DataFrame(rows)
     x = alt.X("序号:Q", title="实验序号", axis=alt.Axis(tickMinStep=1))
@@ -656,31 +493,25 @@ def show_score_curve(run_id: str) -> None:
     st.dataframe(frame, hide_index=True)
 
 
-def show_artifact_page(run_id: str, relative: str) -> None:
-    """Read-only view of one file of one run, opened from the links under an answer."""
-    st.title("研究证据")
+def render_artifact(run_id: str, relative: str) -> None:
+    """One run file, read-only: JSON tree, rendered Markdown, CSV table or plain text."""
     base = run_dir(RUNS, run_id)
     if base is None:
         st.error("找不到这次研究。")
         return
-    st.caption(f"研究 {run_id} · 只读")
     if relative == CURVE:
-        if (base / "summary.json").is_file():
-            show_score_curve(run_id)
-        else:
-            st.info("这次研究还没有 summary.json，暂时画不出得分曲线。")
+        show_score_curve(run_id, curve_summary(base))
         return
     path = resolve_artifact(RUNS, run_id, relative)
     if path is None:
         st.error("只能打开这次研究目录里已存在的文本证据文件（json、md、log、csv 等）。")
         return
-    st.subheader(relative)
     st.code(str(path), language=None)
     text = path.read_text(encoding="utf-8", errors="replace")
     if not text.strip():
         st.info("这个文件是空的。")
         return
-    st.download_button("下载原文件", text, file_name=path.name)
+    st.download_button("下载原文件", text, file_name=path.name, key=f"download-{run_id}-{relative}")
     suffix = path.suffix.lower()
     if suffix == ".json":
         try:
@@ -701,6 +532,1057 @@ def show_artifact_page(run_id: str, relative: str) -> None:
         st.code(text[-VIEWER_TEXT_LIMIT:], language="json" if suffix == ".jsonl" else None)
 
 
+def show_artifact_page(run_id: str, relative: str) -> None:
+    """Full-page view of one run file, for links opened in a new tab."""
+    st.title("研究证据")
+    st.caption(f"研究 {run_id} · 只读")
+    if relative != CURVE:
+        st.subheader(relative)
+    render_artifact(run_id, relative)
+
+
+# ------------------------------------------------------------------------------ navigation
+
+
+def open_file(run_id: str, path: str) -> None:
+    """Show one run file in the workspace viewer; the score curve has its own tab."""
+    if path == CURVE:
+        st.session_state["ws_tab_next"] = "得分曲线"
+    else:
+        current = st.session_state.get("viewer")
+        if current and current != (run_id, path):
+            st.session_state.setdefault("viewer_back", []).append(current)
+        st.session_state["viewer"] = (run_id, path)
+        st.session_state["ws_tab_next"] = "查看器"
+    st.session_state["need_rerun"] = True
+
+
+def rerun_if_asked() -> None:
+    """Widgets inside a fragment only rerun the fragment; a file click must move the tabs."""
+    if st.session_state.pop("need_rerun", False):
+        st.rerun()
+
+
+def set_state(key: str, value: object) -> None:
+    st.session_state[key] = value
+
+
+def toggle(key: str) -> None:
+    st.session_state[key] = not st.session_state.get(key, False)
+
+
+def viewer_back() -> None:
+    history = st.session_state.get("viewer_back") or []
+    if history:
+        st.session_state["viewer"] = history.pop()
+
+
+def set_folder(run_id: str, folder: str) -> None:
+    st.session_state.setdefault("ws_dir", {})[run_id] = folder
+
+
+def open_run(run_id: str) -> None:
+    job = st.session_state.get("job")
+    own = bool(job and job.get("run_id") == run_id)
+    st.session_state["view_run"] = None if own else run_id
+    st.session_state["page"] = "research"
+    st.session_state["viewer"] = None
+    st.session_state["ws_tab_next"] = "文件"
+
+
+def set_page(page: str) -> None:
+    st.session_state["page"] = page
+
+
+def new_research() -> None:
+    job = st.session_state.get("job")
+    if job and job.get("run_id") and (RUNS / job["run_id"] / "summary.json").is_file():
+        st.session_state.pop("job", None)
+    for key in ("view_run", "qa_pending", "viewer"):
+        st.session_state.pop(key, None)
+    reset_task_draft()
+    st.session_state["page"] = "research"
+    st.session_state["ws_tab_next"] = "文件"
+
+
+def start_example(task_name: str) -> None:
+    st.session_state["task_name"] = task_name
+    reset_task_draft()
+    st.session_state["request"] = protocol_card(TASKS[task_name][0])["business_question"]
+
+
+def start_demo_upload() -> None:
+    raw = DEMO_CSV.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    path = ROOT / "ui_state" / "uploads" / f"{digest}.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(raw)
+    reset_task_draft()
+    st.session_state["upload"] = {
+        "path": str(path),
+        "digest": digest,
+        "filename": DEMO_CSV.name,
+        "request": "预测哪些学生期末可能不及格，提前干预",
+    }
+    st.session_state["request"] = st.session_state["upload"]["request"]
+
+
+def live(func, running: bool):
+    """Refresh a block every 2 seconds only while a run is in progress."""
+    return st.fragment(func, run_every="2s" if running else None)
+
+
+def effect_text(value: object) -> str:
+    return f"{value:.4g}" if isinstance(value, int | float) else "—"
+
+
+def local_time(seconds: float | None, pattern: str = "%H:%M:%S") -> str:
+    return datetime.fromtimestamp(seconds).strftime(pattern) if seconds else ""
+
+
+# ------------------------------------------------------------------------------ chat pieces
+
+
+def show_file_chips(run_id: str, evidence: list[dict], answer: str, *, key: str) -> None:
+    """Files behind an answer as chips; a click opens the file in the workspace viewer."""
+    links = answer_links(RUNS, run_id, evidence, answer)
+    if not links:
+        return
+    st.caption("相关文件 · 点文件在右侧查看器打开")
+    for group in GROUPS:
+        items = [link for link in links if link.group == group]
+        if not items:
+            continue
+        widget = f"{key}-{group}"
+        names = {link.path: ("得分曲线" if link.path == CURVE else link.path) for link in items}
+        st.pills(
+            group,
+            list(names),
+            format_func=names.get,
+            key=widget,
+            on_change=pick_chip,
+            args=(run_id, widget),
+        )
+
+
+def pick_chip(run_id: str, widget: str) -> None:
+    if value := st.session_state.get(widget):
+        open_file(run_id, value)
+
+
+def show_quick_questions(run_id: str, *, key: str) -> None:
+    """Zero-token quick questions as light chips in one row; the chosen one is answered below."""
+    chosen = st.pills(
+        "快捷问题（不花 Token）",
+        list(QUICK_QUESTIONS),
+        format_func=QUICK_QUESTIONS.get,
+        key=key,
+    )
+    if chosen:
+        answer = answer_quick(chosen, run_id, STORE)
+        with st.chat_message("assistant"):
+            st.write(answer["answer"])
+            st.caption(f"证据：runs/{run_id}/summary.json · 0 Token")
+            show_file_chips(run_id, answer["evidence"], answer["answer"], key=f"{key}-{chosen}")
+
+
+def show_open_qa(run_id: str) -> None:
+    thread = st.session_state.setdefault("qa_threads", {}).setdefault(run_id, [])
+    pending = st.session_state.pop("qa_pending", None)
+    if pending and pending[0] == run_id:
+        thread.append(ask_open_question(run_id, pending[1], thread))
+    for index, turn in enumerate(thread):
+        with st.chat_message("user"):
+            st.write(turn["question"])
+        with st.chat_message("assistant"):
+            if turn.get("error"):
+                st.error(f"问答失败：{turn['error']}")
+                continue
+            if turn.get("note"):
+                st.info(turn["note"])
+                continue
+            st.write(turn["answer"])
+            verified = set(turn.get("verified_numbers", []))
+            if turn.get("numbers"):
+                marks = " ".join(
+                    f"{number} {'✅' if number in verified else '⚠️'}" for number in turn["numbers"]
+                )
+                st.caption(f"数字核对：{marks}（⚠️＝没在证据里找到原值）")
+            refs = [f"{ref['kind']}:{ref['ref_id']}" for ref in turn.get("evidence", [])]
+            cited = " · ".join(refs) if refs else "无可核对的引用"
+            st.caption(f"证据：{cited} · LLM {turn['tokens']:,} Token")
+            show_file_chips(
+                run_id, turn.get("evidence", []), turn["answer"], key=f"qa-{run_id}-{index}"
+            )
+
+
+def protocol_summary(run_id: str) -> None:
+    """The confirmed research plan of a run, folded into one line."""
+    base = RUNS / run_id
+    card = read_json(base / "scenario_card.json")
+    contract = read_json(base / "contract.json")
+    excluded = []
+    for event in read_events(base):
+        if event.get("event_type") == "protocol_accepted":
+            excluded = (event.get("details") or {}).get("excluded_features") or []
+            break
+    target = card.get("target") or {}
+    metric = contract.get("primary_metric") or "f1_macro"
+    line = f"目标列 {target.get('column', '?')} · {metric}"
+    if excluded:
+        line += f" · 不能用 {'、'.join(map(str, excluded))}"
+    with st.expander(f"研究方案已确认 · {line}"):
+        st.write(f"**任务：** {card.get('title', run_id)}")
+        st.write(f"**预测时点：** {card.get('prediction_time', '—')}")
+        st.write(
+            f"**目标列：** {target.get('column', '—')}（正类：{target.get('positive_label', '—')}）"
+        )
+        st.write(f"**指标：** {metric}")
+        budgets = contract.get("budgets") or {}
+        if budgets:
+            st.caption(
+                f"预算：最多 {budgets.get('max_experiments')} 次实验、"
+                f"{budgets.get('max_llm_requests')} 次 LLM 请求、"
+                f"{int(budgets.get('max_llm_tokens') or 0):,} Token"
+            )
+
+
+STATUS_COLORS = {
+    "run": "blue",
+    "best": "green",
+    "delivered": "blue",
+    "warn": "orange",
+    "fail": "red",
+    "base": "gray",
+    "plain": "gray",
+}
+
+
+def show_process(run_id: str, running: bool) -> None:
+    """Search experiments in order, one line each, grouped by round, with their record file."""
+    rows = list(reversed(experiment_table(RUNS / run_id)))
+    done = [row for row in rows if row["kind"] != "run"]
+    rounds = {row["round"] for row in done if isinstance(row["round"], int) and row["round"] > 0}
+    with st.expander(
+        f"研究过程 · {len(done)} 次实验 · {len(rounds)} 轮", expanded=running or len(done) < 4
+    ):
+        if not rows:
+            st.caption("还没有完成的实验。")
+        for row in rows:
+            if row["source"] == "基线":
+                stage = "基线"
+            elif row["source"] == "规则搜索":
+                stage = "规则搜索"
+            elif isinstance(row["round"], int):
+                stage = f"第 {row['round']} 轮"
+            else:
+                stage = row["source"]
+            score = f"`{row['score']:.4f}`" if isinstance(row["score"], int | float) else ""
+            color = STATUS_COLORS.get(row["kind"], "gray")
+            line = st.container(horizontal=True, vertical_alignment="center", gap="small")
+            with line:
+                st.markdown(
+                    f"`{clock(row['elapsed'])}` **{stage}** {row['id']} {row['change']} "
+                    f"{score} :{color}[{row['status']}]"
+                )
+                if row["path"]:
+                    st.button(
+                        "打开",
+                        key=f"process-{run_id}-{row['id']}",
+                        type="tertiary",
+                        icon=":material/description:",
+                        help=row["path"],
+                        on_click=open_file,
+                        args=(run_id, row["path"]),
+                    )
+        st.button(
+            "在查看器打开全部事件（events.jsonl）",
+            key=f"process-events-{run_id}",
+            type="tertiary",
+            on_click=open_file,
+            args=(run_id, "events.jsonl"),
+        )
+    rerun_if_asked()
+
+
+def show_progress(run_id: str) -> None:
+    """Pinned above the input while a run is in progress; reruns the page once it finishes."""
+    base = RUNS / run_id
+    job = st.session_state.get("job") or {}
+    if (base / "summary.json").is_file():
+        if not job.get("finished_seen"):
+            job["finished_seen"] = True
+            # A 2-second block may still be mid-refresh; one more clean pass settles the page.
+            st.session_state["settle_rerun"] = True
+            st.rerun()
+        return
+    process = job.get("process")
+    if process is not None and process.poll() is not None:
+        st.error("研究进程已退出，但没有生成 summary.json；请查看运行日志 ui_state/research.log。")
+        return
+    state = progress(base)
+    best = f"`{state['best']:.4f}`（{state['best_id']}）" if state["best"] is not None else "—"
+    with st.container(border=True, key="progress_card"):
+        st.markdown(
+            f"**研究进度** · 第 {state['round']} 轮 · {state['experiments']} / "
+            f"{state['max_experiments'] or '—'} 次实验 · 用时 {clock(state['elapsed'])} · "
+            f"当前最优 {best}"
+        )
+        stages = " → ".join(
+            f":green[:material/check_circle: {label}]"
+            if done
+            else f":gray[:material/radio_button_unchecked: {label}]"
+            for label, done in state["stages"]
+        )
+        running = f" · 正在训练 {state['running']}" if state["running"] else ""
+        st.caption(stages + running)
+
+
+def show_conclusion(run_id: str) -> None:
+    summary = STORE.get_summary(run_id)
+    evaluation = STORE.get_final_evaluation(run_id)
+    llm = summary.get("llm") or {}
+    with st.container(border=True):
+        st.markdown("**研究结论**")
+        with st.container(horizontal=True):
+            st.metric(
+                "开发集 · 基线 → 交付",
+                f"{fmt(summary.get('baseline_score'))} → {fmt(summary.get('delivered_dev_score'))}",
+                border=True,
+            )
+            st.metric(
+                "Holdout · 只评一次",
+                fmt(evaluation.get("holdout_score")) if evaluation else "未评测",
+                border=True,
+            )
+            st.metric("新切分复核", summary.get("confirmation_status", "未知"), border=True)
+            st.metric("LLM Token", f"{int(llm.get('tokens') or 0):,}", border=True)
+        delivered = summary.get("delivered_experiment_id")
+        detail = read_json(RUNS / run_id / "experiments" / f"{delivered}.json") if delivered else {}
+        lines = (
+            [f"交付 {delivered}：{describe_spec(detail.get('spec') or {})}"] if delivered else []
+        )
+        if evaluation:
+            lines.append(holdout_text(evaluation))
+        lines.append(
+            f"LLM {llm.get('requests', 0)} 次请求 · 用时 {clock(summary.get('wall_seconds'))} · "
+            f"代码版本 {summary.get('code_version')}"
+        )
+        st.caption("  \n".join(lines))
+        if not evaluation and st.button("运行一次 holdout 评测", key=f"evaluate-{run_id}"):
+            if error := evaluate_run(run_id):
+                st.error(error)
+            else:
+                st.rerun()
+        st.caption(
+            "数值来自 summary.json 和 final_evaluation.json；是否通过由程序判断，不由 LLM 判断。"
+        )
+    show_quick_questions(run_id, key=f"faq-{run_id}")
+
+
+def show_starting() -> None:
+    """The run directory appears a moment after launch; show the run as soon as it does."""
+    job = st.session_state.get("job")
+    if not job:
+        return
+    if locate_run(job) is not None:
+        st.rerun()
+    if job["process"].poll() is not None:
+        st.error("研究进程在创建 run 目录前退出。请查看 ui_state/research.log。")
+        log_path = ROOT / "ui_state" / "research.log"
+        if log_path.is_file():
+            st.code(log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
+        return
+    st.info("研究进程正在启动，页面会自动更新。")
+
+
+def show_empty_state() -> None:
+    st.markdown("## 接下来想研究什么？")
+    st.caption("在下方描述要预测什么，可以附上一份二分类 CSV。先确认研究方案，再开始研究。")
+    st.markdown("**从示例开始**")
+    cards = [(name, text) for name, text in EXAMPLES.items()]
+    grid = st.columns(2)
+    for index, (name, text) in enumerate(cards):
+        with grid[index % 2], st.container(border=True):
+            st.button(
+                name,
+                key=f"example-{name}",
+                type="tertiary",
+                on_click=start_example,
+                args=(name,),
+            )
+            st.caption(text)
+    if DEMO_CSV.is_file():
+        with grid[len(cards) % 2], st.container(border=True):
+            st.button(
+                "学生成绩预警（上传 CSV 示例）",
+                key="example-upload",
+                type="tertiary",
+                on_click=start_demo_upload,
+            )
+            st.caption("逐列确认哪些数据列能用，附人工标准协议")
+    recent = history_rows(RUNS, STORE.list_runs())[:3]
+    if recent:
+        st.markdown("**最近研究**")
+        for row in recent:
+            label = f"{row['title']} · {row['source']}"
+            if row["score"]:
+                label += f" · {row['score']}"
+            st.button(
+                label,
+                key=f"recent-{row['run_id']}",
+                type="tertiary",
+                on_click=open_run,
+                args=(row["run_id"],),
+            )
+
+
+def show_setup_flow() -> None:
+    """Confirm the research plan (example card or uploaded CSV) and start the run."""
+    with st.chat_message("user"):
+        st.write(st.session_state["request"])
+
+    if st.session_state.get("upload"):
+        show_upload_protocol(st.session_state["upload"], llm_on)
+        return
+
+    card = protocol_card(task_id)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    with st.chat_message("assistant"):
+        if task_id.startswith("upload-"):
+            st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
+        else:
+            st.write("请确认研究方案。以下是该示例的任务说明。")
+        st.write(f"**任务：** {card['title']}")
+        st.write(f"**预测时点：** {card['prediction_time']}")
+        st.write(
+            f"**目标列：** {card['target']['column']}（正类：{card['target']['positive_label']}）"
+        )
+        st.write(f"**指标：** {config.get('primary_metric', 'f1_macro')}")
+        fields = card["fields"]
+        usable = {
+            "available": "✅ 可以用",
+            "post_outcome": "❌ 不能用：结果出来后才知道",
+            "identifier": "➖ 不用：只是编号",
+        }
+        count = f"（共 {len(fields)} 列）" if fields else ""
+        with st.expander(f"哪些数据列可以用来预测{count}"):
+            if fields:
+                # Columns that cannot be used come first so they are easy to check.
+                ordered = sorted(fields, key=lambda field: field["availability"] == "available")
+                st.dataframe(
+                    [
+                        {
+                            "数据列": field["name"],
+                            "能否用来预测": usable.get(
+                                field["availability"], field["availability"]
+                            ),
+                            "说明": field.get("note", field.get("description", "")),
+                        }
+                        for field in ordered
+                    ],
+                    hide_index=True,
+                    alt="示例任务的每个数据列能否用来预测，以及说明",
+                )
+            elif card.get("default_availability") == "available":
+                st.write("这个示例的所有数据列都可以用来预测。")
+            else:
+                st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
+        confirmed = st.checkbox(
+            "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
+        )
+
+    with st.chat_message("assistant"):
+        run_config = research_config(config, proposer, ROOT)
+        budget = run_config["budget"]
+        if proposer == "llm":
+            source = (
+                f"提案来源 `llm`（{run_config['llm'].get('model') or os.environ.get('LLM_MODEL')}，"
+                f"最多 {budget['max_llm_requests']} 次请求、{budget['max_llm_tokens']:,} Token）"
+            )
+        else:
+            source = "提案来源 `scripted`（0 Token）"
+        st.write(
+            f"**研究预算：** 最多 {budget['max_experiments']} 次实验；系统 `budgetlab`，{source}。"
+        )
+        ready = (DATA / "prepared" / task_id / "development.csv").is_file()
+        if not ready:
+            st.warning(
+                "当前任务数据尚未准备。Bank 和 Adult 首次准备需下载数据；Breast Cancer 可离线准备。"
+            )
+            if st.button("准备示例数据", disabled=not confirmed):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "budgetlab.cli",
+                        "prepare",
+                        "--task",
+                        task_id,
+                        "--data-root",
+                        str(DATA),
+                    ],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode:
+                    st.error(result.stderr[-1000:])
+                else:
+                    st.rerun()
+        if st.button(
+            "开始研究", disabled=not confirmed or not ready or bool(st.session_state.get("job"))
+        ):
+            st.session_state["job"] = launch(task_id, config_path, proposer)
+            st.session_state["view_run"] = None
+            st.session_state["ws_tab_next"] = "研究路径"
+            st.rerun()
+
+
+def show_compare() -> None:
+    st.button("返回研究", icon=":material/arrow_back:", on_click=set_page, args=("research",))
+    matrix_data = load_matrix(ROOT / "results")
+    if matrix_data:
+        matrix, rows, formal = matrix_data
+        st.subheader("正式成绩" if formal else "开发数据")
+        if not formal:
+            st.warning("这是一轮脚本化提案的开发数据，仅用于搭建和检查页面，不是正式成绩。")
+        st.caption(f"来源：{matrix.parent.relative_to(ROOT)}")
+        valid = [row for row in rows if row.get("status") == "ok"]
+        with st.container(horizontal=True):
+            st.metric("系统", len({row.get("system") for row in valid}), border=True)
+            st.metric("完成的运行", len(valid), border=True)
+            st.metric("任务", len({row.get("task_id") for row in valid}), border=True)
+        columns = [
+            "system",
+            "proposal_source",
+            "baseline_score",
+            "delivered_dev_score",
+            "holdout_score",
+            "llm_tokens",
+            "wall_seconds",
+            "experiments",
+            "run_id",
+        ]
+        st.dataframe(
+            [{key: row.get(key) for key in columns} for row in rows],
+            hide_index=True,
+            alt="各研究系统的开发集、holdout 分数和运行成本对比",
+        )
+        run_options = [row["run_id"] for row in valid if row.get("run_id")]
+        if run_options:
+            chosen = st.selectbox("查看单次运行轨迹", run_options)
+            summary_path = matrix.parent / "runs" / chosen / "summary.json"
+            if summary_path.is_file():
+                trajectory = trajectory_rows(json.loads(summary_path.read_text(encoding="utf-8")))
+                if trajectory:
+                    if any(row["累计 Token"] for row in trajectory):
+                        st.line_chart(
+                            trajectory,
+                            x="累计 Token",
+                            y="最优分",
+                            alt="最优分随累计 Token 的变化",
+                        )
+                    else:
+                        st.caption("这次运行没有消耗 LLM Token，改按实验顺序展示最优分。")
+                        st.line_chart(
+                            trajectory,
+                            x="实验",
+                            y="最优分",
+                            alt="零 Token 运行中最优分随实验顺序的变化",
+                        )
+                    st.line_chart(
+                        trajectory,
+                        x="累计秒数",
+                        y="最优分",
+                        alt="最优分随累计运行时间的变化",
+                    )
+    else:
+        st.info("当前分支尚未包含 results/dev-* 或 results/final-* 对照数据。")
+
+
+# ------------------------------------------------------------------------------ workspace
+
+
+def show_files(run_id: str, running: bool, highlight: set[str]) -> None:
+    base = RUNS / run_id
+    folders = st.session_state.setdefault("ws_dir", {})
+    folder = folders.get(run_id, "")
+    entries = list_entries(RUNS, run_id, folder)
+    if entries is None:
+        folder, entries = "", list_entries(RUNS, run_id) or []
+    with st.container(horizontal=True, vertical_alignment="center"):
+        if folder:
+            parent = folder.rsplit("/", 1)[0] if "/" in folder else ""
+            st.button(
+                "上一级",
+                key=f"files-up-{run_id}",
+                icon=":material/arrow_upward:",
+                type="tertiary",
+                on_click=set_folder,
+                args=(run_id, parent),
+            )
+        st.markdown(f"`runs / {run_id}" + (f" / {folder}`" if folder else "`"))
+    with st.container(horizontal=True, vertical_alignment="center"):
+        query = st.text_input(
+            "筛选文件名",
+            key="files_filter",
+            placeholder="筛选文件名…",
+            label_visibility="collapsed",
+        )
+        order = st.segmented_control(
+            "排序",
+            ["时间", "名称"],
+            key="files_sort",
+            default="时间",
+            required=True,
+            label_visibility="collapsed",
+        )
+        only = st.checkbox("只看本轮" if running else "只看相关", key="files_only")
+    since = round_started_at(read_events(base)) if running else None
+
+    def fresh(entry: dict) -> bool:
+        if running:
+            return since is not None and entry["mtime"] >= since
+        return entry["path"] in highlight or any(
+            path.startswith(entry["path"] + "/") for path in highlight
+        )
+
+    rows = [
+        entry
+        for entry in sort_entries(entries, "name" if order == "名称" else "time")
+        if query.strip().lower() in entry["name"].lower() and (not only or fresh(entry))
+    ]
+    count = sum(fresh(entry) for entry in entries)
+    if count:
+        reason = "本轮新写入" if running else "最近一次回答引用"
+        st.markdown(f":green-background[● 绿色标出的是{reason}的文件（共 {count} 个）]")
+    frame = pd.DataFrame(
+        [
+            {
+                "名称": entry["name"],
+                "大小": f"{entry['items']} 项" if entry["is_dir"] else size_text(entry["size"]),
+                "时间": local_time(entry["mtime"], "%m-%d %H:%M:%S"),
+            }
+            for entry in rows
+        ],
+        columns=["名称", "大小", "时间"],
+    )
+    marks = [fresh(entry) for entry in rows]
+    styler = frame.style.apply(
+        lambda row: (
+            [
+                "background-color: #ECFDF3; color: #05603A; font-weight: 600"
+                if marks[row.name]
+                else ""
+            ]
+            * len(row)
+        ),
+        axis=1,
+    )
+    widget = f"files-{run_id}-{folder}-{st.session_state.get('files_nonce', 0)}"
+    st.dataframe(
+        styler,
+        key=widget,
+        hide_index=True,
+        on_select=partial(pick_file, run_id, widget, rows),
+        selection_mode="single-row",
+        height=min(36 * (len(rows) + 1) + 4, 520),
+    )
+    dirs = sum(entry["is_dir"] for entry in entries)
+    st.caption(f"{dirs} 个文件夹 · {len(entries) - dirs} 个文件 · 点一行打开")
+    rerun_if_asked()
+
+
+def pick_file(run_id: str, widget: str, rows: list[dict]) -> None:
+    selection = st.session_state.get(widget)
+    picked = selection.selection.rows if selection else []
+    if not picked:
+        return
+    entry = rows[picked[0]]
+    st.session_state["files_nonce"] = st.session_state.get("files_nonce", 0) + 1
+    if entry["is_dir"]:
+        set_folder(run_id, entry["path"])
+    elif entry["viewable"]:
+        open_file(run_id, entry["path"])
+    else:
+        st.session_state["files_notice"] = f"{entry['path']} 不是文本文件，不在页面里打开。"
+
+
+def show_viewer() -> None:
+    current = st.session_state.get("viewer")
+    if not current:
+        st.info("点文件列表、回答下的文件或实验表格里的一行，会在这里打开。")
+        return
+    run_id, path = current
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.button(
+            "后退",
+            key="viewer-back",
+            icon=":material/arrow_back:",
+            type="tertiary",
+            disabled=not st.session_state.get("viewer_back"),
+            on_click=viewer_back,
+        )
+        st.markdown(f"`{path}`")
+        st.link_button(
+            "新标签打开",
+            "?" + urlencode({"run": run_id, "file": path}, safe="/"),
+            icon=":material/open_in_new:",
+            type="tertiary",
+        )
+    render_artifact(run_id, path)
+
+
+def curve_summary(base: Path) -> dict:
+    """summary.json once a run ends; during a run, a trajectory rebuilt from its experiments."""
+    summary = read_json(base / "summary.json")
+    if summary.get("trajectory"):
+        return summary
+    rows = [
+        row
+        for row in experiment_table(base)
+        if row["kind"] != "run" and isinstance(row["elapsed"], int | float)
+    ]
+    rows.sort(key=lambda row: row["elapsed"])
+    return {
+        "primary_metric": read_json(base / "contract.json").get("primary_metric"),
+        "baseline_score": next((row["score"] for row in rows if row["kind"] == "base"), None),
+        "trajectory": [
+            {
+                "experiment_id": row["id"],
+                "best_score_after": row["best_after"],
+                "mean_score": row["score"],
+                "origin": row["source"],
+                "round": row["round"],
+                "llm_tokens_so_far": row["tokens"],
+                "elapsed_seconds": row["elapsed"],
+            }
+            for row in rows
+        ],
+    }
+
+
+def show_workspace(run_id: str | None, running: bool, highlight: set[str], tall: bool) -> None:
+    with st.container(key="ws_panel_tall" if tall else "ws_panel"):
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.segmented_control(
+                "工作区", WS_TABS, key="ws_tab", required=True, label_visibility="collapsed"
+            )
+            if running:
+                st.caption(":green[●] 每 2 秒更新")
+        tab = st.session_state.get("ws_tab") or "文件"
+        with st.container(key="ws_body"):
+            if run_id is None:
+                st.markdown("**这里会显示研究生成的文件**")
+                st.caption(
+                    "开始研究后，每次实验的记录、程序裁决、每轮提案、日志和最终报告都会实时出现在这里。"
+                    "点文件就在查看器里打开。"
+                )
+                return
+            if notice := st.session_state.pop("files_notice", None):
+                st.info(notice)
+            if tab == "文件":
+                live(show_files, running)(run_id, running, highlight)
+            elif tab == "查看器":
+                show_viewer()
+            elif tab == "研究路径":
+                live(render_branch_map, running)(RUNS / run_id)
+            else:
+                show_score_curve(run_id, curve_summary(RUNS / run_id))
+
+
+# ------------------------------------------------------------------------------ experiment panel
+
+
+def show_experiments(run_id: str, running: bool) -> None:
+    base = RUNS / run_id
+    rows = experiment_table(base)
+    metric = read_json(base / "contract.json").get("primary_metric") or "score"
+    if not rows:
+        st.caption("还没有实验。")
+        return
+    frame = pd.DataFrame(
+        [
+            {
+                "实验": row["id"],
+                metric: row["score"],
+                "较此前最优": row["delta"],
+                "状态": row["status"],
+                "来源": row["source"],
+                "耗时(s)": row["seconds"],
+                "做了什么": row["change"] or MODEL_NAMES.get(row["model"], row["model"]),
+            }
+            for row in rows
+        ]
+    )
+    for column in (metric, "较此前最优", "耗时(s)"):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    tints = {
+        "run": "background-color: #EEF3FF; color: #1D4ED8",
+        "best": "background-color: #ECFDF3; color: #05603A",
+        "delivered": "background-color: #EEF3FF; color: #1D4ED8; font-weight: 600",
+        "warn": "background-color: #FFFAEB; color: #93370D",
+        "fail": "background-color: #FEF3F2; color: #B42318",
+    }
+    kinds = [row["kind"] for row in rows]
+    styler = frame.style.format(
+        {metric: "{:.4f}", "较此前最优": "{:+.4f}", "耗时(s)": "{:.1f}"}, na_rep="—"
+    ).apply(
+        lambda column: (
+            [tints.get(kind, "") for kind in kinds] if column.name == "状态" else [""] * len(column)
+        ),
+        axis=0,
+    )
+    widget = f"experiments-{run_id}-{st.session_state.get('exp_nonce', 0)}"
+    st.dataframe(
+        styler,
+        key=widget,
+        hide_index=True,
+        on_select=partial(pick_experiment, run_id, widget, rows),
+        selection_mode="single-row",
+        column_config={"做了什么": st.column_config.TextColumn(width="medium")},
+    )
+    rounds = {row["round"] for row in rows if isinstance(row["round"], int) and row["round"] > 0}
+    policy = read_json(base / "contract.json").get("decision_policy") or {}
+    st.caption(
+        f"共 {sum(kind != 'run' for kind in kinds)} 个实验 · {len(rounds)} 轮 · "
+        f"最小提升 {effect_text(policy.get('min_effect'))} · 点一行在查看器打开"
+    )
+    rerun_if_asked()
+
+
+def pick_experiment(run_id: str, widget: str, rows: list[dict]) -> None:
+    selection = st.session_state.get(widget)
+    picked = selection.selection.rows if selection else []
+    if picked and rows[picked[0]]["path"]:
+        st.session_state["exp_nonce"] = st.session_state.get("exp_nonce", 0) + 1
+        open_file(run_id, rows[picked[0]]["path"])
+
+
+def show_tokens(run_id: str) -> None:
+    ledger = token_ledger(RUNS / run_id)
+    used, unknown, limit = ledger["used"], ledger["unknown"], ledger["limit"]
+    with st.container(horizontal=True):
+        st.metric("本次研究 LLM Token", f"{used:,}", border=True)
+        st.metric("预算", f"{limit:,}" if limit else "—", border=True)
+        st.metric("未知用量", f"{unknown:,}", border=True)
+    if limit:
+        st.progress(min((used + unknown) / limit, 1.0), text="已记 + 未知 / 预算")
+    roles = ledger["by_role"]
+    st.caption(
+        f"提案 {roles.get('proposer', {}).get('tokens', 0):,} · "
+        f"审查 {roles.get('critic', {}).get('tokens', 0):,} Token"
+    )
+    if unknown:
+        st.warning("有请求未返回完整 usage；未知用量单列，未当作 0 Token。")
+    if ledger["by_round"]:
+        st.dataframe(ledger["by_round"], hide_index=True, alt="每轮提案和审查的 Token 使用记录")
+    usage = st.session_state.get("qa_usage") or {}
+    if usage.get("requests"):
+        st.caption(
+            f"本会话追问：{usage['requests']} 次请求、{usage['tokens']:,} Token"
+            "（记在 ui_state/qa_calls.jsonl）"
+        )
+    st.caption(
+        "只统计本次研究的提案和审查。CSV 协议起草和开放问答的 Token 另记在 ui_state/；"
+        "程序实验和快捷问答不调用 LLM。"
+    )
+
+
+def show_validation(run_id: str) -> None:
+    base = RUNS / run_id
+    summary = read_json(base / "summary.json")
+    if not summary:
+        st.info("研究结束后，这里显示新切分复核和 holdout 结果。")
+        return
+    evaluation = STORE.get_final_evaluation(run_id)
+    left, right = st.columns(2)
+    with left:
+        st.markdown(f"**新切分复核** · `{summary.get('confirmation_status', '未知')}`")
+        policy = read_json(base / "contract.json").get("decision_policy") or {}
+        seeds = policy.get("confirmation_split_seeds") or []
+        deltas = summary.get("confirmation_deltas") or []
+        if deltas:
+            st.dataframe(
+                [
+                    {
+                        "切分": f"seed {seeds[index]}" if index < len(seeds) else f"#{index + 1}",
+                        "交付减基线": round(delta, 4),
+                    }
+                    for index, delta in enumerate(deltas)
+                ],
+                hide_index=True,
+            )
+        st.caption(f"门槛：每次都要高于最小提升 {effect_text(policy.get('min_effect'))}")
+    with right:
+        st.markdown("**Holdout** · 只能评一次")
+        if evaluation:
+            st.metric("holdout 分数", fmt(evaluation.get("holdout_score")))
+            interval = evaluation.get("holdout_ci95") or []
+            if len(interval) == 2:
+                st.caption(f"95% 区间 {fmt(interval[0])}–{fmt(interval[1])}")
+            st.caption(
+                f"封存数据 {evaluation.get('holdout_rows', '—'):,} 行 · 开发集 "
+                f"{fmt(evaluation.get('development_cv_score'))}，差 "
+                f"{fmt(evaluation.get('dev_minus_holdout'))}"
+            )
+        elif st.button("运行一次 holdout 评测", key=f"panel-evaluate-{run_id}"):
+            if error := evaluate_run(run_id):
+                st.error(error)
+            else:
+                st.rerun()
+
+
+def show_compare_compact() -> None:
+    matrix_data = load_matrix(ROOT / "results")
+    if not matrix_data:
+        st.caption("还没有 results/ 下的对比数据。")
+        return
+    matrix, rows, formal = matrix_data
+    st.markdown(f"**系统对比** · {'正式成绩' if formal else ':orange[开发数据]'}")
+    st.dataframe(
+        [
+            {
+                "任务": row.get("task_id"),
+                "系统": row.get("system"),
+                "基线": row.get("baseline_score"),
+                "交付": row.get("delivered_dev_score"),
+            }
+            for row in rows
+            if row.get("status") == "ok"
+        ],
+        hide_index=True,
+    )
+    st.caption(f"来源：{matrix.parent.relative_to(ROOT)}" + ("" if formal else " · 不是正式成绩"))
+
+
+def show_panel(run_id: str | None, running: bool) -> None:
+    opened = st.session_state.get("panel_open", True)
+    rows = experiment_table(RUNS / run_id) if run_id else []
+    counts = (
+        f"运行 {sum(row['kind'] == 'run' for row in rows)} · "
+        f"完成 {sum(row['kind'] not in {'run', 'fail'} for row in rows)} · "
+        f"失败 {sum(row['kind'] == 'fail' for row in rows)}"
+        if run_id
+        else "暂无运行"
+    )
+    with st.container(key="exp_panel" if opened else "exp_panel_closed"):
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.markdown("**实验面板**")
+            st.caption(counts)
+            if opened and run_id:
+                st.segmented_control(
+                    "面板内容",
+                    PANEL_TABS,
+                    key="panel_tab",
+                    default="实验",
+                    required=True,
+                    label_visibility="collapsed",
+                )
+            st.space("stretch")
+            st.button(
+                "收起" if opened else "展开",
+                key="panel-toggle",
+                on_click=set_state,
+                args=("panel_open", not opened),
+            )
+        if not opened:
+            return
+        with st.container(key="exp_body"):
+            if run_id is None:
+                show_compare_compact()
+            elif (st.session_state.get("panel_tab") or "实验") == "实验":
+                live(show_experiments, running)(run_id, running)
+            elif st.session_state.get("panel_tab") == "Token":
+                show_tokens(run_id)
+            else:
+                show_validation(run_id)
+
+
+# ------------------------------------------------------------------------------ drawer
+
+
+def show_drawer(focus: str | None, busy: bool) -> None:
+    with st.container(key="drawer_panel"):
+        with st.container(horizontal=True, vertical_alignment="center"):
+            st.button(
+                ":material/menu:",
+                key="drawer-close",
+                help="收起研究记录",
+                type="tertiary",
+                on_click=toggle,
+                args=("drawer",),
+            )
+            st.markdown("**研究记录**")
+            st.space("stretch")
+            st.button(
+                "新研究",
+                key="drawer-new",
+                icon=":material/add:",
+                disabled=busy,
+                help="研究运行中，结束后才能开始新研究" if busy else None,
+                on_click=new_research,
+            )
+        query = (
+            st.text_input(
+                "搜索研究记录",
+                key="history_query",
+                placeholder="搜索任务、系统或编号",
+                label_visibility="collapsed",
+            )
+            .strip()
+            .lower()
+        )
+        rows = [
+            row
+            for row in history_rows(RUNS, STORE.list_runs())
+            if not query
+            or any(
+                query in str(row.get(field) or "").lower()
+                for field in ("title", "task_id", "system", "run_id")
+            )
+        ]
+        with st.container(key="history_list"):
+            today = datetime.now().date()
+            last_day = None
+            for row in rows:
+                started = row["started"].astimezone() if row["started"] else None
+                day = started.date() if started else None
+                if day != last_day:
+                    st.caption("今天" if day == today else (day.isoformat() if day else "未知日期"))
+                    last_day = day
+                key = "hist_active" if row["run_id"] == focus else f"hist-{row['run_id']}"
+                with st.container(key=key):
+                    st.button(
+                        row["title"],
+                        key=f"open-{row['run_id']}",
+                        type="tertiary",
+                        on_click=open_run,
+                        args=(row["run_id"],),
+                    )
+                    meta = [row["source"], "已完成" if row["finished"] else "未完成"]
+                    if row["score"]:
+                        meta.append(row["score"])
+                    if started:
+                        meta.append(started.strftime("%H:%M"))
+                    st.caption(" · ".join(meta))
+            if not rows:
+                st.caption("没有匹配的研究记录。")
+        st.button(
+            "系统对比",
+            key="drawer-compare",
+            icon=":material/insights:",
+            type="tertiary",
+            on_click=set_page,
+            args=("compare",),
+        )
+        st.caption("读取 results/ 下最新的正式或开发矩阵")
+
+
+# ------------------------------------------------------------------------------ page
+
 st.set_page_config(
     page_title="BudgetLab 研究助手",
     page_icon=":material/science:",
@@ -715,401 +1597,245 @@ except ImportError as exc:
     st.caption(f"技术信息：{exc}")
     st.stop()
 if "file" in st.query_params:
-    # Evidence links under answers open here, in a new tab, without touching the research page.
+    # Evidence links opened in a new tab show one file, without the research page.
     show_artifact_page(st.query_params.get("run", ""), st.query_params.get("file", ""))
     st.stop()
 LLM_PROBLEM = llm_problem(ROOT)
+MODEL = (llm_overrides(ROOT).get("llm") or {}).get("model") or os.environ.get("LLM_MODEL") or "LLM"
 st.html("""<style>
-body::before {
-  content:"";position:fixed;inset:-30%;pointer-events:none;z-index:0;
-  background:radial-gradient(ellipse at 24% 35%,#b8ff6524,transparent 42%),
-             radial-gradient(ellipse at 76% 65%,#b8ff6515,transparent 42%);
-  animation:aurora 26s ease-in-out infinite alternate;
+[data-testid="stMainBlockContainer"] {padding: 3.25rem .5rem .5rem; max-width: 100%;}
+[data-testid="stHeader"] {background: rgba(245, 246, 248, .9);}
+.st-key-drawer_panel, .st-key-chat_panel, .st-key-ws_panel, .st-key-ws_panel_tall,
+.st-key-exp_panel, .st-key-exp_panel_closed {
+  background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 12px;
+  padding: .6rem .9rem; box-sizing: border-box;
 }
-@keyframes aurora {from {transform:translate(-4%,2%) rotate(-6deg)}
-  to {transform:translate(5%,-3%) rotate(7deg)}}
-@media (prefers-reduced-motion:reduce) {body::before {animation:none}}
-.st-key-brand_header {
-  background:linear-gradient(110deg,#192436,#101823 68%);
-  border:1px solid #304052;border-radius:18px;
-  padding:.75rem 1.4rem;margin-bottom:.7rem;
-  position:sticky;top:.25rem;z-index:20;
-  box-shadow:0 12px 36px #0005;
+.st-key-drawer_panel, .st-key-chat_panel, .st-key-ws_panel, .st-key-ws_panel_tall,
+.st-key-exp_panel {flex: none !important;}
+.st-key-drawer_panel, .st-key-chat_panel {height: calc(100vh - 4rem) !important;}
+.st-key-ws_panel {height: calc(100vh - 4rem - 330px) !important;}
+.st-key-ws_panel_tall {height: calc(100vh - 4rem - 66px) !important;}
+.st-key-exp_panel {height: 318px !important;}
+/* Streamlit wraps nested containers; the wrapper takes the free height, the block scrolls. */
+[data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll),
+[data-testid="stLayoutWrapper"]:has(> .st-key-ws_body),
+[data-testid="stLayoutWrapper"]:has(> .st-key-exp_body),
+[data-testid="stLayoutWrapper"]:has(> .st-key-history_list) {
+  flex: 1 1 0 !important; min-height: 0 !important;
 }
-.st-key-brand_header h3 {letter-spacing:-.04em;font-weight:800;margin:0;}
-.st-key-left_rail,.st-key-center_rail,.st-key-right_rail {
-  height:calc(100vh - 10.5rem);overflow-y:auto;
-  padding:1.3rem;border:1px solid #263446;
-  border-radius:16px;
-  scrollbar-color:#40556a transparent;
+.st-key-chat_scroll, .st-key-ws_body, .st-key-exp_body, .st-key-history_list {
+  height: 100% !important; overflow-y: auto !important; overflow-x: hidden;
 }
-.st-key-left_rail,.st-key-right_rail {background:#111925;}
-.st-key-center_rail {background:#151f2c;}
-.st-key-left_rail h4,.st-key-right_rail h4 {color:#b8ff65;letter-spacing:.04em;}
-.st-key-token_meter {
-  background:linear-gradient(135deg,#243a30,#17271f);
-  padding:1rem 1.1rem;border:1px solid #4a7250;
-  border-radius:14px;margin-top:1rem;
+.st-key-hist_active {background: #EEF3FF; border-radius: 8px; padding: 0 .4rem;}
+.st-key-history_list button {justify-content: flex-start; text-align: left;}
+.st-key-chat_head {flex-wrap: nowrap !important;}
+.st-key-chat_head [data-testid="stElementContainer"]:has([data-testid="stMarkdown"]) {
+  min-width: 0; flex: 0 1 auto;
 }
-.st-key-token_meter h2 {color:#b8ff65;letter-spacing:-.06em;}
-.st-key-research_prompt {
-  position:fixed;bottom:.7rem;left:25%;width:44%;z-index:30;
-  background:#192536;border:1px solid #3b5267;
-  border-radius:16px;padding:.45rem .7rem;
-  box-shadow:0 18px 44px #0009;
+.st-key-chat_head [data-testid="stMarkdownContainer"] p {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;
 }
-@media (max-width:900px) {
-  .st-key-left_rail,.st-key-center_rail,.st-key-right_rail {
-    height:auto;max-height:none;overflow:visible;
-  }
-  .st-key-research_prompt {left:1rem;width:calc(100% - 2rem);}
-}
+.st-key-progress_card {background: #FCFCFD;}
+[data-testid="stMetricValue"] {font-variant-numeric: tabular-nums;}
+[data-testid="stMetricLabel"] p {font-size: .85rem;}
+code {font-variant-numeric: tabular-nums;}
 </style>""")
-with st.container(key="brand_header"):
-    brand, status = st.columns([2, 1], vertical_alignment="center")
-    with brand:
-        st.markdown("### BudgetLab")
-    with status:
-        st.caption("● RESEARCH")
-    view = st.segmented_control(
-        "工作区", ["研究对话", "系统对比"], default="研究对话", label_visibility="collapsed"
+
+for key, value in (("ws_tab", "文件"), ("page", "research"), ("panel_open", True)):
+    st.session_state.setdefault(key, value)
+if "ws_tab_next" in st.session_state:
+    st.session_state["ws_tab"] = st.session_state.pop("ws_tab_next")
+
+job = st.session_state.get("job")
+job_dir = locate_run(job) if job else None
+job_done = bool(job_dir and (job_dir / "summary.json").is_file())
+busy = bool(job and not job_done and job["process"].poll() is None)
+view_run = st.session_state.get("view_run")
+if view_run and run_dir(RUNS, view_run) is None:
+    view_run = st.session_state["view_run"] = None
+focus = view_run or (job_dir.name if job_dir else None)
+running = bool(focus and job_dir and focus == job_dir.name and busy)
+starting = bool(job and job_dir is None and not view_run)
+finished_focus = bool(focus and (RUNS / focus / "summary.json").is_file())
+
+drawer_open = st.session_state.get("drawer", False)
+ws_hidden = st.session_state.get("ws_hidden", False)
+widths = ([0.62] if drawer_open else []) + [1.35] + ([] if ws_hidden else [1.0])
+columns = st.columns(widths, gap="small")
+if drawer_open:
+    with columns[0]:
+        show_drawer(focus, busy)
+chat_col = columns[1 if drawer_open else 0]
+
+with chat_col, st.container(key="chat_panel"):
+    head = st.container(horizontal=True, vertical_alignment="center", key="chat_head")
+    scroll = st.container(key="chat_scroll")
+    footer = st.container(key="chat_footer")
+
+with footer:
+    if running:
+        live(show_progress, True)(focus)
+    if running or starting:
+        placeholder = "研究完成后可以就结果追问；运行中可以先在右侧查看实时生成的文件"
+    elif finished_focus:
+        placeholder = "就这次研究追问，例如：为什么最后选了这个模型？"
+    else:
+        placeholder = "描述任务，可附上二分类 CSV"
+    prompt = st.chat_input(
+        placeholder,
+        key="composer",
+        accept_file=not finished_focus,
+        file_type="csv",
+        disabled=running or starting,
+    )
+    with st.container(horizontal=True, vertical_alignment="center"):
+        task_name = st.selectbox(
+            "任务",
+            list(TASKS),
+            key="task_name",
+            disabled=bool(job),
+            on_change=reset_task_draft,
+            format_func=lambda name: f"任务 · {name}",
+            label_visibility="collapsed",
+            width=240,
+        )
+        choices = ["LLM", "脚本化"] if LLM_PROBLEM is None else ["脚本化"]
+        choice = st.selectbox(
+            "提案",
+            choices,
+            key="proposer_choice",
+            disabled=bool(job),
+            format_func=lambda item: (
+                f"提案 · LLM（{MODEL}）" if item == "LLM" else "提案 · 脚本化（0 Token）"
+            ),
+            label_visibility="collapsed",
+            width=280,
+        )
+        if busy:
+            st.caption("运行中，任务和提案来源已锁定")
+        elif LLM_PROBLEM is not None:
+            st.caption(f"{LLM_PROBLEM}：只用脚本化提案和快捷问题。")
+        elif choice == "LLM":
+            st.caption("LLM 起草协议、提出实验、回答追问；指标和裁决由程序计算")
+        else:
+            st.caption("已关闭 LLM：用脚本化提案和快捷问题")
+    task_id, config_path = TASKS[task_name]
+    if st.session_state.get("custom_task"):
+        task_id, config_path = st.session_state["custom_task"]
+        config_path = Path(config_path)
+    llm_on = choice == "LLM" and LLM_PROBLEM is None
+    proposer = "llm" if llm_on else "scripted"
+
+if prompt:
+    if finished_focus and not prompt.files and prompt.text.strip():
+        st.session_state["qa_pending"] = (focus, prompt.text.strip())
+        st.session_state["page"] = "research"
+    elif prompt.files:
+        uploaded = prompt.files[0]
+        raw = uploaded.getvalue()
+        digest = hashlib.sha256(raw).hexdigest()[:16]
+        path = ROOT / "ui_state" / "uploads" / f"{digest}.csv"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+        reset_task_draft()
+        st.session_state["upload"] = {
+            "path": str(path),
+            "digest": digest,
+            "filename": uploaded.name,
+            "request": prompt.text.strip() or f"预测 {uploaded.name} 中的二分类目标",
+        }
+        st.session_state["request"] = st.session_state["upload"]["request"]
+        st.session_state["view_run"] = None
+        st.rerun()
+    elif prompt.text.strip():
+        st.session_state["request"] = prompt.text.strip()
+        st.session_state["view_run"] = None
+        st.rerun()
+
+page = st.session_state.get("page", "research")
+if page == "compare":
+    title, badge = "系统对比", None
+elif focus:
+    card = read_json(RUNS / focus / "scenario_card.json")
+    own = bool(job_dir and focus == job_dir.name)
+    title = card.get("title") or (st.session_state.get("request") if own else None) or focus
+    badge = (
+        ("运行中", "blue")
+        if running
+        else (("已完成", "green") if finished_focus else ("未完成", "orange"))
+    )
+else:
+    title = st.session_state.get("request") or "新研究"
+    badge = None
+with head:
+    if not drawer_open:
+        st.button(
+            ":material/menu:",
+            key="drawer-open",
+            help="打开研究记录",
+            type="tertiary",
+            on_click=toggle,
+            args=("drawer",),
+        )
+    st.markdown(f"**{title}**")
+    if badge:
+        st.badge(badge[0], color=badge[1])
+    st.space("stretch")
+    st.button(
+        ":material/right_panel_open:" if ws_hidden else ":material/right_panel_close:",
+        key="ws-toggle",
+        help="显示工作区" if ws_hidden else "隐藏工作区",
+        type="tertiary",
+        on_click=toggle,
+        args=("ws_hidden",),
     )
 
-left_col, center_col, right_col = st.columns([1.05, 2.15, 1.28], gap=None)
-with left_col:
-    with st.container(key="left_rail"):
-        st.markdown("#### 研究目录")
-        task_name = st.selectbox(
-            "示例任务",
-            list(TASKS),
-            disabled=bool(st.session_state.get("job")),
-            on_change=reset_task_draft,
-        )
-        task_id, config_path = TASKS[task_name]
-        if st.session_state.get("custom_task"):
-            custom_id, custom_config = st.session_state["custom_task"]
-            task_id, config_path = custom_id, Path(custom_config)
-            st.caption("当前任务：你上传的 CSV")
-        use_llm = st.toggle(
-            "使用 LLM",
-            value=LLM_PROBLEM is None,
-            key="use_llm",
-            disabled=LLM_PROBLEM is not None or bool(st.session_state.get("job")),
-        )
-        llm_on = use_llm and LLM_PROBLEM is None
-        proposer = "llm" if llm_on else "scripted"
-        if LLM_PROBLEM is not None:
-            st.caption(f"{LLM_PROBLEM}：使用脚本化提案和快捷问题，不使用 LLM。")
-        elif llm_on:
-            st.caption("LLM 负责起草 CSV 协议、提出实验和回答开放问题；指标和裁决仍由程序计算。")
-        else:
-            st.caption("已关闭 LLM：使用脚本化提案和快捷问题。")
-        history = STORE.list_runs()
-        run_labels = {
-            row["run_id"]: (
-                f"{row.get('task_id') or '未知任务'} · "
-                f"{row.get('system') or '未知系统'} · "
-                f"{'已完成' if row['finished'] else '进行中'} · "
-                f"{row['run_id'][:15]}"
-            )
-            for row in history
-        }
-        history_id = st.selectbox(
-            f"研究记录（{len(history)}）",
-            ["开始新研究", *run_labels],
-            format_func=lambda run_id: run_labels.get(run_id, run_id),
-        )
-        active = st.session_state.get("job")
-        if active:
-            st.caption(f"运行中 · {active.get('run_id') or '启动中'}")
-            active_run_id = active.get("run_id")
-            if active_run_id and (RUNS / active_run_id / "summary.json").is_file():
-                st.success("研究已完成")
-                if st.button("开始另一个任务"):
-                    for key in ("job", "request", "protocol_confirmed", "qa_pending"):
-                        st.session_state.pop(key, None)
-                    st.rerun()
-        selected_run_id = (
-            history_id if history_id != "开始新研究" else active.get("run_id") if active else None
-        )
-        selected_run_dir = RUNS / selected_run_id if selected_run_id else None
-        render_token_panel(selected_run_dir)
-        show_side_progress(selected_run_dir, history_id != "开始新研究")
-
-with right_col:
-    with st.container(key="right_rail"):
-        st.markdown("#### 证据文件")
-        if selected_run_dir and selected_run_dir.is_dir():
-            for name in (
-                "contract.json",
-                "events.jsonl",
-                "budget.json",
-                "summary.json",
-                "final_evaluation.json",
-                "report.md",
-            ):
-                file_path = selected_run_dir / name
-                if file_path.is_file():
-                    with st.expander(f"↗ {name}"):
-                        st.code(str(file_path.relative_to(ROOT)))
-        else:
-            st.write("开始研究后在这里查看证据。")
-        show_side_results(selected_run_dir, history_id != "开始新研究")
-
-with center_col:
-    with st.container(key="center_rail"):
-        if view == "系统对比":
-            matrix_data = load_matrix(ROOT / "results")
-            if matrix_data:
-                matrix, rows, formal = matrix_data
-                st.subheader("正式成绩" if formal else "开发数据")
-                if not formal:
-                    st.warning("这是一轮脚本化提案的开发数据，仅用于搭建和检查页面，不是正式成绩。")
-                st.caption(f"来源：{matrix.parent.relative_to(ROOT)}")
-                valid = [row for row in rows if row.get("status") == "ok"]
-                with st.container(horizontal=True):
-                    st.metric("系统", len({row.get("system") for row in valid}), border=True)
-                    st.metric("完成的运行", len(valid), border=True)
-                    st.metric("任务", len({row.get("task_id") for row in valid}), border=True)
-                columns = [
-                    "system",
-                    "proposal_source",
-                    "baseline_score",
-                    "delivered_dev_score",
-                    "holdout_score",
-                    "llm_tokens",
-                    "wall_seconds",
-                    "experiments",
-                    "run_id",
-                ]
-                st.dataframe(
-                    [{key: row.get(key) for key in columns} for row in rows],
-                    hide_index=True,
-                    alt="各研究系统的开发集、holdout 分数和运行成本对比",
-                )
-                run_options = [row["run_id"] for row in valid if row.get("run_id")]
-                if run_options:
-                    chosen = st.selectbox("查看单次运行轨迹", run_options)
-                    summary_path = matrix.parent / "runs" / chosen / "summary.json"
-                    if summary_path.is_file():
-                        trajectory = trajectory_rows(
-                            json.loads(summary_path.read_text(encoding="utf-8"))
-                        )
-                        if trajectory:
-                            if any(row["累计 Token"] for row in trajectory):
-                                st.line_chart(
-                                    trajectory,
-                                    x="累计 Token",
-                                    y="最优分",
-                                    alt="最优分随累计 Token 的变化",
-                                )
-                            else:
-                                st.caption("这次运行没有消耗 LLM Token，改按实验顺序展示最优分。")
-                                st.line_chart(
-                                    trajectory,
-                                    x="实验",
-                                    y="最优分",
-                                    alt="零 Token 运行中最优分随实验顺序的变化",
-                                )
-                            st.line_chart(
-                                trajectory,
-                                x="累计秒数",
-                                y="最优分",
-                                alt="最优分随累计运行时间的变化",
-                            )
-            else:
-                st.info("当前分支尚未包含 results/dev-* 或 results/final-* 对照数据。")
-            st.stop()
-        if history_id != "开始新研究":
-            history_dir = RUNS / history_id
-            st.subheader("已有研究")
-            st.caption(f"{history_id} · 数据来自本机 runs/，不属于正式成绩")
-            show_saved_run_map(history_dir)
-            if (history_dir / "summary.json").is_file():
-                history_summary = STORE.get_summary(history_id)
-                st.markdown("### 研究结论")
-                with st.container(horizontal=True):
-                    baseline = history_summary.get("baseline_score")
-                    delivered = history_summary.get("delivered_dev_score")
-                    st.metric(
-                        "基线", f"{baseline:.3f}" if baseline is not None else "—", border=True
-                    )
-                    st.metric(
-                        "交付模型",
-                        f"{delivered:.3f}" if delivered is not None else "—",
-                        border=True,
-                    )
-                    st.metric(
-                        "确认状态", history_summary.get("confirmation_status", "未知"), border=True
-                    )
-                evaluation = STORE.get_final_evaluation(history_id)
-                if evaluation:
-                    st.write(holdout_text(evaluation))
-                elif st.button("运行一次 holdout 评测", key=f"history-evaluate-{history_id}"):
-                    if error := evaluate_run(history_id):
-                        st.error(error)
-                    else:
-                        st.rerun()
-                show_quick_questions(history_id, key=f"history-faq-{history_id}")
-            else:
-                st.info("这次研究还没有最终汇总，可能正在运行，也可能已中断。步骤仍可查看。")
-            with st.container(key="research_prompt"):
-                st.chat_input("当前记录请使用上方快捷问题", disabled=True)
-            st.stop()
-
-        if "request" not in st.session_state:
-            with st.container(border=True):
-                st.subheader("快速演示")
-                st.write("选择示例任务，或在下方对话框附上二分类 CSV。确认协议后再启动研究。")
-                if st.button("用所选示例开始", type="primary"):
-                    st.session_state["request"] = protocol_card(task_id)["business_question"]
-                    st.rerun()
-
-        finished = finished_run_id()
-        with st.container(key="research_prompt"):
-            prompt = st.chat_input(
-                "就这次研究追问，例如：为什么最后选了这个模型？"
-                if finished
-                else "描述任务，可附上二分类 CSV",
-                accept_file=True,
-                file_type="csv",
-            )
-        if prompt:
-            if finished and not prompt.files and prompt.text.strip():
-                st.session_state["qa_pending"] = (finished, prompt.text.strip())
-            elif prompt.files:
-                uploaded = prompt.files[0]
-                raw = uploaded.getvalue()
-                digest = hashlib.sha256(raw).hexdigest()[:16]
-                path = ROOT / "ui_state" / "uploads" / f"{digest}.csv"
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(raw)
-                st.session_state["upload"] = {
-                    "path": str(path),
-                    "digest": digest,
-                    "filename": uploaded.name,
-                    "request": prompt.text.strip() or f"预测 {uploaded.name} 中的二分类目标",
-                }
-                st.session_state["request"] = st.session_state["upload"]["request"]
-                st.session_state.pop("custom_task", None)
-                st.session_state.pop("protocol_confirmed", None)
-                for key in (
-                    "upload-target",
-                    "upload-positive",
-                    "upload-time",
-                    "upload-metric",
-                    "upload-demo-card",
-                ):
-                    st.session_state.pop(key, None)
-            elif prompt.text.strip():
-                st.session_state["request"] = prompt.text.strip()
-        if "request" not in st.session_state:
-            st.info("输入一句任务描述，可附上二分类 CSV；也可以先选择示例任务。")
-            st.stop()
-
-        with st.chat_message("user"):
-            st.write(st.session_state["request"])
-
-        if st.session_state.get("upload"):
-            show_upload_protocol(st.session_state["upload"], llm_on)
-            st.stop()
-
-        card = protocol_card(task_id)
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        with st.chat_message("assistant"):
-            if task_id.startswith("upload-"):
-                st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
-            else:
-                st.write("请确认研究方案。以下是该示例的任务说明。")
-            st.write(f"**任务：** {card['title']}")
-            st.write(f"**预测时点：** {card['prediction_time']}")
-            st.write(
-                f"**目标列：** {card['target']['column']}"
-                f"（正类：{card['target']['positive_label']}）"
-            )
-            st.write(f"**指标：** {config.get('primary_metric', 'f1_macro')}")
-            fields = card["fields"]
-            usable = {
-                "available": "✅ 可以用",
-                "post_outcome": "❌ 不能用：结果出来后才知道",
-                "identifier": "➖ 不用：只是编号",
+if not ws_hidden:
+    highlight: set[str] = set()
+    if focus and finished_focus:
+        thread = (st.session_state.get("qa_threads") or {}).get(focus) or []
+        last = next((turn for turn in reversed(thread) if turn.get("answer")), None)
+        if last:
+            highlight = {
+                link.path
+                for link in answer_links(RUNS, focus, last.get("evidence", []), last["answer"])
             }
-            count = f"（共 {len(fields)} 列）" if fields else ""
-            with st.expander(f"哪些数据列可以用来预测{count}"):
-                if fields:
-                    # Columns that cannot be used come first so they are easy to check.
-                    ordered = sorted(fields, key=lambda field: field["availability"] == "available")
-                    st.dataframe(
-                        [
-                            {
-                                "数据列": field["name"],
-                                "能否用来预测": usable.get(
-                                    field["availability"], field["availability"]
-                                ),
-                                "说明": field.get("note", field.get("description", "")),
-                            }
-                            for field in ordered
-                        ],
-                        hide_index=True,
-                        alt="示例任务的每个数据列能否用来预测，以及说明",
-                    )
-                elif card.get("default_availability") == "available":
-                    st.write("这个示例的所有数据列都可以用来预测。")
-                else:
-                    st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
-            confirmed = st.checkbox(
-                "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
-            )
+    with columns[-1]:
+        show_workspace(focus, running, highlight, tall=not st.session_state.get("panel_open", True))
+        show_panel(focus, running)
 
-        with st.chat_message("assistant"):
-            run_config = research_config(config, proposer, ROOT)
-            budget = run_config["budget"]
-            if proposer == "llm":
-                source = (
-                    "提案来源 `llm`（"
-                    f"{run_config['llm'].get('model') or os.environ.get('LLM_MODEL')}，"
-                    f"最多 {budget['max_llm_requests']} 次请求、"
-                    f"{budget['max_llm_tokens']:,} Token）"
-                )
-            else:
-                source = "提案来源 `scripted`（0 Token）"
+with scroll:
+    if page == "compare":
+        show_compare()
+    elif focus:
+        own = bool(job_dir and focus == job_dir.name)
+        with st.chat_message("user"):
+            card = read_json(RUNS / focus / "scenario_card.json")
             st.write(
-                f"**研究预算：** 最多 {budget['max_experiments']} 次实验；"
-                f"系统 `budgetlab`，{source}。"
+                (st.session_state.get("request") if own else None)
+                or card.get("business_question")
+                or focus
             )
-            ready = (DATA / "prepared" / task_id / "development.csv").is_file()
-            if not ready:
-                st.warning(
-                    "当前任务数据尚未准备。Bank 和 Adult 首次准备需下载数据；"
-                    "Breast Cancer 可离线准备。"
-                )
-                if st.button("准备示例数据", disabled=not confirmed):
-                    result = subprocess.run(
-                        [
-                            sys.executable,
-                            "-m",
-                            "budgetlab.cli",
-                            "prepare",
-                            "--task",
-                            task_id,
-                            "--data-root",
-                            str(DATA),
-                        ],
-                        cwd=ROOT,
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                    )
-                    if result.returncode:
-                        st.error(result.stderr[-1000:])
-                    else:
-                        st.rerun()
-            if st.button(
-                "开始研究", disabled=not confirmed or not ready or bool(st.session_state.get("job"))
-            ):
-                st.session_state["job"] = launch(task_id, config_path, proposer)
-                st.rerun()
+        protocol_summary(focus)
+        live(show_process, running)(focus, running)
+        if finished_focus:
+            show_conclusion(focus)
+            show_open_qa(focus)
+        elif not running:
+            st.info("这次研究还没有最终汇总，可能已中断。研究过程和文件仍可查看。")
+            log_path = ROOT / "ui_state" / "research.log"
+            if own and log_path.is_file():
+                with st.expander("运行日志末尾"):
+                    st.code(log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
+    elif starting:
+        with st.chat_message("user"):
+            st.write(st.session_state.get("request") or "开始研究")
+        st.fragment(show_starting, run_every="2s")()
+    elif "request" in st.session_state:
+        show_setup_flow()
+    else:
+        show_empty_state()
 
-        show_active_run()
-        if finished_run_id():
-            show_open_qa(finished_run_id())
+if st.session_state.pop("settle_rerun", False):
+    time.sleep(1.0)
+    st.rerun()
