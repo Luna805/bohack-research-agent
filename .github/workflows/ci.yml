@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Install locked dependencies
+        run: python -m uv sync --frozen --extra dev --extra llm
+      - name: Lint
+        run: python -m uv run --frozen ruff check .
+      - name: Format check
+        run: python -m uv run --frozen ruff format --check budgetlab tests
+      - name: Tests (offline, no API keys)
+        run: python -m uv run --frozen pytest -q
