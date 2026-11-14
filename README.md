@@ -67,6 +67,19 @@ contexts and outputs), `rounds/round-NN.json` (proposal, rejected / selected / n
 reasons, trigger source), `experiments/<id>.json` (spec, result, all verdicts, logs),
 `confirmation.json`, `delivery/`, `summary.json`, `report.md`, `final_evaluation.json`.
 
+## Chat research page (offline demonstration)
+
+Install the optional UI dependencies with `uv sync --frozen --extra dev --extra llm --extra ui`,
+then run `uv run streamlit run budgetlab/ui/app.py`. Describe a task, choose the built-in
+Breast Cancer smoke task for an offline run, confirm its protocol card, prepare the data,
+and start research. The Bank Marketing task uses the same flow but preparation downloads
+the UCI dataset. The page labels scripted proposals as **not using an LLM**. Every score
+is read from the run artifacts. Holdout scoring requires a separate button and can run once.
+
+This first D slice uses existing scenario cards. Free-form protocol drafting, arbitrary CSV
+uploads, and open-ended QA depend on the A and C interfaces documented in
+`docs/INTERFACES.md`.
+
 ## Tests
 
 ```bash
