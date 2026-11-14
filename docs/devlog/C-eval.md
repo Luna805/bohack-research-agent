@@ -10,6 +10,21 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 13:17–13:30 · yirran + Claude Code（分支 `c/dev-results-ci`）
+- 做了：在干净的 `e053b73`（机器空闲）上重跑两个任务的开发矩阵 → `results/dev-20261114T051756Z`（scripted，1 次重复，6 个 slot 全部成功），这是第一份带 holdout 置信区间和配对 bootstrap 的结果，交给 D 当样例数据。
+- 结果：
+
+  | 任务 | 系统 | holdout（95% 区间） | 相对随机搜索 Δ（配对 95% 区间） |
+  |---|---|---|---|
+  | Bank | random_search | 0.7099（0.696–0.725） | — |
+  | Bank | budgetlab_no_schedule | 0.7099（0.696–0.725） | 0（预测完全相同） |
+  | Bank | budgetlab | 0.7099（0.696–0.725） | 0（预测完全相同） |
+  | Adult | random_search | 0.8143（0.805–0.823） | — |
+  | Adult | budgetlab_no_schedule | 0.7941（0.785–0.803） | −0.0202（−0.029 至 −0.011，**完全低于 0**） |
+  | Adult | budgetlab | 0.8151（0.805–0.824） | +0.0008（−0.004 至 +0.005，区分不开） |
+
+- 解读（仍然是 scripted，不是成绩）：在 Adult 上，脚本化提案器单独使用时明显比随机搜索差，配对区间完全在 0 以下；加上规则调度后追平随机搜索。配对 bootstrap 能把"真的有差别"和"区分不开"分开，这正是正式矩阵需要的。
+
 ### 2026-11-14 约 12:55–13:15 · yirran + Claude Code（分支 `c/holdout-ci`）
 - 做了：holdout 置信区间和配对检验。`evaluation/` 在唯一一次评测时：用 bootstrap（1000 次，固定种子）算出 95% 区间 `holdout_ci95`；保存不含标签的逐行预测 `holdout_predictions.csv`（标签只留在 `data/sealed/`）。新增 `paired_bootstrap()`：两个交付模型在同一批重采样行上打分后相减。矩阵跑完后对每对"系统 vs 随机搜索"做配对 bootstrap，写入 `paired_bootstrap.json`，并在 `comparison.json` 和 `aggregate.md` 里报"区间完全在 0 以上 / 以下"的配对数；`aggregate.csv` 末尾新增 `holdout_ci_low` 和 `holdout_ci_high` 两列。指标计算改为基于混淆矩阵的向量化版本，有测试保证和训练时的 sklearn 定义一致。
 - 验证：新增 `tests/test_holdout_ci.py`（指标一致性、区间可复现且包含点估计、roc_auc）；`test_benchmark.py` 检查区间、预测文件不含标签、配对区间；锁定环境全套 55 passed；ruff 通过。在机器空闲时用 Bank 实跑一个小矩阵（临时目录，代码未提交）：三个系统交付的模型预测完全相同（holdout 都是 0.7099），单个分数的 95% 区间是 **0.696–0.725**，配对差值为 0、区间 [0, 0]，判为 identical。

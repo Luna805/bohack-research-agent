@@ -1,0 +1,22 @@
+{
+  "bootstrap": {
+    "method": "percentile bootstrap over holdout rows",
+    "resamples": 1000,
+    "seed": 20261114
+  },
+  "delivered_experiment_id": "r02-c2",
+  "dev_minus_holdout": -0.00011232047525455702,
+  "development_cv_score": 0.7097981281650848,
+  "evaluated_at": "2026-11-14T05:20:41.663988+00:00",
+  "holdout_ci95": [
+    0.6956646765003585,
+    0.7247480420236867
+  ],
+  "holdout_rows": 8238,
+  "holdout_score": 0.7099104486403394,
+  "metric": "f1_macro",
+  "model_hash": "7b1e89a096b8a75e44e97576bc0f57b8fd156c2bd13721cf89032312f4f06004",
+  "predictions_ref": "holdout_predictions.csv",
+  "predictions_sha256": "384353e7f2ec72d0ee722e6e494a80b2a21e9e61a6e27cf31db5956e0191bcf8",
+  "run_id": "20261114T051932Z-budgetlab_no_schedule-aba244"
+}
