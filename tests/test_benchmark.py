@@ -153,3 +153,36 @@ def test_untracked_code_makes_checkout_dirty_but_outputs_do_not(tmp_path) -> Non
     info = git_info(tmp_path)
     assert info["dirty"] is True
     assert info["dirty_files"] == ["new_module.py"]
+
+
+def test_llm_matrix_preflight_catches_zero_budget_and_missing_model(
+    tmp_path, smoke_config, monkeypatch
+) -> None:
+    matrix_path, _ = _write_matrix(tmp_path, smoke_config, proposer="llm", systems=["budgetlab"])
+    slots = plan_slots(load_matrix(matrix_path), tmp_path)
+
+    def broken(config, kind):
+        raise RuntimeError("LLM model name is not configured")
+
+    monkeypatch.setattr(benchmark, "make_agents", broken)
+    problems = benchmark.preflight(slots)
+    assert any("must be positive" in problem for problem in problems)
+    assert any("model name is not configured" in problem for problem in problems)
+    with pytest.raises(MatrixError, match="preflight failed"):
+        run_matrix(
+            matrix_path,
+            runs_root=tmp_path / "runs",
+            data_root=tmp_path / "data",
+            results_root=tmp_path / "results",
+            base_dir=tmp_path,
+            log=lambda *_: None,
+        )
+    assert not (tmp_path / "results").exists()
+
+    monkeypatch.setattr(benchmark, "make_agents", lambda config, kind: (object(), None))
+    funded = dict(smoke_config)
+    funded["budget"] = dict(smoke_config["budget"], max_llm_requests=10, max_llm_tokens=50_000)
+    matrix_path, _ = _write_matrix(tmp_path, funded, proposer="llm", systems=["budgetlab"])
+    assert benchmark.preflight(plan_slots(load_matrix(matrix_path), tmp_path)) == []
+    scripted_path, _ = _write_matrix(tmp_path, smoke_config)
+    assert benchmark.preflight(plan_slots(load_matrix(scripted_path), tmp_path)) == []

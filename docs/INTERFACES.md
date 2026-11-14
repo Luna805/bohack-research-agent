@@ -197,6 +197,9 @@ python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml             # 
 python -m budgetlab.benchmark --resume <matrix_id>                            # 中断后继续；任务配置变了会拒绝
 ```
 
+- `proposer: llm` 的矩阵在开跑前会做检查：每个任务配置的 `max_llm_requests` 和 `max_llm_tokens` 必须为正数，模型名和 Key 必须已配置（只构造对象，不发请求）。`--dry-run` 也会输出检查结果。
+- 正式矩阵的配置：`configs/benchmark/final.yaml`（LLM，两个任务 × 三个系统 × 3 次重复，LLM 预算和输出上限待 A 确认）；拿不到 LLM 时用 `configs/benchmark/final-scripted.yaml`。两份都是 19:30 冻结前的草稿。
+
 ## 6. 经验库（P1，B 提供，A 使用）
 
 ```text

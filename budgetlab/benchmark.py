@@ -17,7 +17,10 @@ Rules baked in:
   ``summary.json``, ``final_evaluation.json`` and ``report.md`` are copied into ``results/``;
 * ``aggregate.csv`` / ``aggregate.json`` / ``aggregate.md`` are rewritten after every run,
   so an interrupted matrix keeps everything finished so far and can be resumed;
-* a ``final`` matrix refuses to start from a checkout with uncommitted changes.
+* a ``final`` matrix refuses to start from a checkout with uncommitted changes;
+* a matrix with ``proposer: llm`` is checked before anything runs (positive LLM budget in
+  every task config, model and key configured), so a misconfigured night run fails in
+  seconds instead of recording a column of failed slots.
 """
 
 from __future__ import annotations
@@ -36,7 +39,7 @@ from typing import Any
 import yaml
 
 from .contracts import stable_hash
-from .controller import SYSTEMS, run_research
+from .controller import SYSTEMS, make_agents, run_research
 from .evaluation import evaluate_frozen_run
 from .ledger import atomic_write_json, utc_now
 from .provenance import code_version_label, environment_info, git_info
@@ -160,6 +163,30 @@ def plan_slots(matrix: dict[str, Any], base_dir: Path) -> list[dict[str, Any]]:
                     }
                 )
     return slots
+
+
+def preflight(slots: list[dict[str, Any]], *, check_credentials: bool = True) -> list[str]:
+    """Problems that would make LLM slots fail or stop at once. No model request is made."""
+    problems: list[str] = []
+    checked: set[str] = set()
+    for slot in slots:
+        # Repeats differ only in search_seed, so one check per task is enough.
+        if slot["proposer_kind"] != "llm" or slot["task"] in checked:
+            continue
+        checked.add(slot["task"])
+        budget = slot["config"].get("budget", {})
+        label = f"{slot['task']} ({slot['config_path']})"
+        if int(budget.get("max_llm_requests", 0)) <= 0 or int(budget.get("max_llm_tokens", 0)) <= 0:
+            problems.append(
+                f"{label}: max_llm_requests and max_llm_tokens must be positive for proposer=llm "
+                "(otherwise every run stops at once with llm_budget_exhausted)"
+            )
+        if check_credentials:
+            try:
+                make_agents(slot["config"], "llm")
+            except Exception as exc:  # report every configuration problem before starting
+                problems.append(f"{label}: cannot build the LLM proposer: {exc}")
+    return problems
 
 
 # ---------------------------------------------------------------------------- rows
@@ -311,6 +338,9 @@ def run_matrix(
             f"(code version: {code_version_label(git)})"
         )
     slots = plan_slots(matrix, base_dir)
+    problems = preflight(slots, check_credentials=proposer_factory is None)
+    if problems:
+        raise MatrixError("preflight failed:\n- " + "\n- ".join(problems))
     if record is not None:
         registered = {slot["slot_id"]: slot["config_hash"] for slot in record["slots"]}
         changed = [s["slot_id"] for s in slots if registered.get(s["slot_id"]) != s["config_hash"]]
@@ -390,12 +420,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.matrix is None:
             parser.error("--dry-run needs --matrix")
         matrix = load_matrix(args.matrix)
-        for slot in plan_slots(matrix, Path(".")):
+        slots = plan_slots(matrix, Path("."))
+        for slot in slots:
             print(
                 f"{slot['slot_id']:<48} proposer={slot['proposer_kind']} "
                 f"search_seed={slot['config']['search_seed']}"
             )
-        return 0
+        problems = preflight(slots)
+        report = "preflight problems:\n- " + "\n- ".join(problems) if problems else "preflight: ok"
+        print(report)
+        return 0 if not problems else 1
     out_dir = run_matrix(
         args.matrix,
         resume=args.resume,

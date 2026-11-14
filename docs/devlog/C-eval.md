@@ -10,6 +10,12 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 11:55–12:00 · yirran + Claude Code（分支 `c/final-prep`，基于 `c/second-task`）
+- 做了：矩阵脚本增加 **LLM 开跑前检查** `preflight()`：`proposer: llm` 时检查每个任务的 LLM 预算是否为正、模型名和 Key 是否已配置（不发请求）；不通过就在创建 results 目录之前报错，`--dry-run` 也会输出检查结果。起草 `configs/benchmark/final.yaml`（LLM，Bank 加 Adult，三个系统，3 次重复，每个 run 的 LLM 预算为 40 次请求、30 万 Token，`max_output_tokens` 2000，待 A 确认）和备用的 `configs/benchmark/final-scripted.yaml`。
+- 耗时估算（按机器空闲时的实测）：scripted 每次重复约 11.5 分钟（Bank 248 s + Adult 444 s），3 次重复约 35 分钟；LLM 版每次重复预计 20–35 分钟，3 次重复约 60–100 分钟，20:00–00:30 的窗口足够。如果 A 在 19:00 测得单次提案少于 10 秒，可以改成 5 次重复。
+- 验证：`test_benchmark.py` 8 个测试通过（新增开跑前检查的测试）；锁定环境全套 50 passed；ruff 通过；在本机对 `final.yaml` 做 dry-run，检查正确地报出"没有配置 LLM"，`final-scripted.yaml` 显示 ok。`c/second-task` 的 CI（`c71a56f`）通过。
+- 待决定：正式矩阵用哪个 LLM、预算多少（A 和协调人）；重复 3 次还是 5 次（19:00 定）。
+
 ### 2026-11-14 约 11:38–11:55 · yirran + Claude Code（分支 `c/second-task`）
 - 做了：第二个任务 **UCI Adult**（根据人口普查记录判断年收入是否超过 5 万美元；共 48,842 行，正例 24%）。适配器会自动下载并校验 `adult.data` 和 `adult.test` 的哈希，把两个文件合并后由我们自己重新切分（开发集 39,073 行，holdout 9,769 行），并把 `?` 转成缺失值。场景卡标注了 `fnlwgt`（抽样权重，不描述个人）、`education-num`（和 `education` 是同一信息），并在限制里写明 `race` 和 `sex` 是受保护属性。新增 `configs/adult.yaml`；`configs/benchmark/dev.yaml` 改为包含两个任务。
 - 验证：`tests/test_tasks.py` 3 个离线测试通过（场景卡覆盖所有列、读文件和标签清洗、未知标签拒绝）；锁定环境全套 49 passed；ruff 通过。
