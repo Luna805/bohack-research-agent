@@ -437,15 +437,18 @@ class _PydanticAIRole:
         return UsageLimits(request_limit=self.settings.output_retries + 1)
 
     async def _run_http(self, prompt: str, trace: dict[str, Any]) -> Any:
-        import httpx
+        try:  # openai>=3 ships its HTTP layer as ``httpx2``; older releases use ``httpx``
+            import httpx2 as httpx
+        except ImportError:
+            import httpx
         from openai import AsyncOpenAI
         from pydantic_ai.models.openai import OpenAIChatModel
         from pydantic_ai.providers.openai import OpenAIProvider
 
-        async def on_request(request: httpx.Request) -> None:
+        async def on_request(request: Any) -> None:
             trace["requests"] += 1
 
-        async def on_response(response: httpx.Response) -> None:
+        async def on_response(response: Any) -> None:
             await response.aread()
             try:
                 usage = response.json().get("usage")
