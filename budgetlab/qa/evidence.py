@@ -27,16 +27,23 @@ class EvidenceStore:
             return []
         rows = []
         for path in sorted(self.runs_root.iterdir(), reverse=True):
-            if path.is_dir() and (path / "summary.json").is_file():
-                summary = self._read(path / "summary.json")
-                rows.append(
-                    {
-                        "run_id": path.name,
-                        "system": summary.get("system"),
-                        "task_id": summary.get("task_id"),
-                        "finished": True,
-                    }
-                )
+            if not path.is_dir() or not (path / "events.jsonl").exists():
+                continue
+            summary_path = path / "summary.json"
+            config_path = path / "run_config.json"
+            metadata = (
+                self._read(summary_path)
+                if summary_path.exists()
+                else (self._read(config_path) if config_path.exists() else {})
+            )
+            rows.append(
+                {
+                    "run_id": path.name,
+                    "system": metadata.get("system"),
+                    "task_id": metadata.get("task_id"),
+                    "finished": summary_path.exists(),
+                }
+            )
         return rows
 
     def get_summary(self, run_id: str) -> dict:
