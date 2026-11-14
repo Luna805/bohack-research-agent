@@ -164,3 +164,20 @@ def test_provider_errors_are_not_retried_silently(fake_openai) -> None:
     assert len(server.calls) == 1  # SDK retries are off: exactly one billable attempt
     assert outcome.usage.llm_requests == 1
     assert outcome.unknown.llm_tokens > 0
+
+
+def test_extra_body_is_forwarded_to_provider(fake_openai) -> None:
+    server = fake_openai()
+    settings = LLMSettings(
+        model_name="fake-model",
+        base_url=server.base_url,
+        api_key="test-key",
+        output_mode="tool",
+        max_output_tokens=500,
+        timeout_seconds=10,
+        extra_body={"enable_thinking": False},
+    )
+    outcome = PydanticAIProposer(settings).propose(CONTEXT)
+    assert outcome.error is None
+    assert len(server.calls) == 1
+    assert server.calls[0].get("enable_thinking") is False

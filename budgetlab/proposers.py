@@ -334,6 +334,7 @@ class LLMSettings:
     temperature: float | None = None
     timeout_seconds: float = 120.0
     output_retries: int = 1
+    extra_body: dict[str, Any] | None = None
     input_price_per_mtok: float | None = None
     output_price_per_mtok: float | None = None
 
@@ -349,6 +350,7 @@ class LLMSettings:
             temperature=llm.get("temperature"),
             timeout_seconds=float(llm.get("timeout_seconds", 120)),
             output_retries=int(llm.get("output_retries", 1)),
+            extra_body=llm.get("extra_body"),
             input_price_per_mtok=llm.get("input_price_per_mtok"),
             output_price_per_mtok=llm.get("output_price_per_mtok"),
         )
@@ -398,6 +400,9 @@ class _PydanticAIRole:
         }
         if self.settings.temperature is not None:
             model_settings["temperature"] = self.settings.temperature
+        if self.settings.extra_body is not None:
+            # e.g. {"enable_thinking": false} to switch a reasoning model's thinking off.
+            model_settings["extra_body"] = self.settings.extra_body
         return Agent(
             model,
             output_type=wrapped,
