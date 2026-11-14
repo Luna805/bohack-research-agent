@@ -154,9 +154,10 @@ known_limitations: [...]
 
 ```text
 results/<matrix_id>/
-├── matrix.json        # 预登记：tasks, systems, repeats, config 路径和哈希, code_version, 开始/结束时间
-├── aggregate.csv      # 每个 run 一行（列见下）
+├── matrix.json        # 预登记：matrix 配置、每个 slot（任务/重复/系统/配置哈希/search_seed）、code_version、git、环境、开始/结束时间
+├── aggregate.csv      # 每个 slot 一行（列见下），按计划顺序：任务 → 重复 → 系统
 ├── aggregate.json     # 同一份数据的 JSON 版本
+├── aggregate.md       # 按（任务, 系统）汇总的均值 ± 标准差，人读
 └── runs/<run_id>/     # 只复制这三个文件：summary.json, final_evaluation.json, report.md
 ```
 
@@ -169,11 +170,32 @@ delivered_dev_score, holdout_score, dev_minus_holdout,
 llm_calls, llm_requests, llm_tokens, llm_unknown_tokens, cost_usd,
 wall_seconds, train_seconds, experiments, fits, rounds,
 duplicates_blocked, invalid_rejected, direction_changes_agent, direction_changes_rule,
-stop_reason
+stop_reason, slot_id, status, error
 ```
+
+`status` 为 `ok` 或 `error`。失败的 slot 也会占一行，但除了 `slot_id`、`task_id`、`system`、`repeat`、`error` 之外的字段都为空；可以用 `--resume` 重跑。
 
 - `matrix_id` 的命名：开发期用 `dev-<日期时间>`，正式矩阵用 `final-<日期时间>`。D 的页面默认展示最新的 `final-*`，没有时展示最新的 `dev-*`，并明确标注"开发数据"。
 - 曲线数据（最优分对累计 Token 和时间）直接取各 run 的 `summary.json` 中的 `trajectory`。
+
+### 5.1 矩阵配置与命令（C）
+
+```yaml
+# configs/benchmark/<名字>.yaml
+kind: dev | final              # final 要求 git 工作区干净
+tasks: [{name: bank_marketing, config: configs/bank_marketing.yaml, overrides: {}}]
+systems: [random_search, budgetlab_no_schedule, budgetlab]
+repeats: 3
+proposer: scripted | llm       # random_search 不使用提案器
+repeat_seed_stride: 1000       # 第 r 次重复：search_seed + (r-1) × stride，所有系统相同；切分和训练种子不变
+overrides: {}                  # 合并进每个任务配置
+```
+
+```bash
+python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml --dry-run   # 只列出计划
+python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml             # 串行运行，每个 run 结束后立即评测 holdout
+python -m budgetlab.benchmark --resume <matrix_id>                            # 中断后继续；任务配置变了会拒绝
+```
 
 ## 6. 经验库（P1，B 提供，A 使用）
 
