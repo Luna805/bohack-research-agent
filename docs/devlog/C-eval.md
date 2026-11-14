@@ -10,6 +10,17 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 16:40–17:20 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`
+- 做了：冻结前修四件事（详见 A、B、D 的日志）：PyArrow 锁定版本、单特征 CSV 崩溃、对话页 LLM 路径、问答 Agent。C 自己的部分：`csv_task.development_rows` / `development_profile`，在注册前复现 `prepare_task` 的开发集，供协议 Agent 起草时使用。
+- 验证：`tests/test_csv_task.py` 新增切分一致性测试（行数、标签、取值逐行相同）；全量测试、ruff 见合并记录。
+- 下一步：19:30 冻结，20:00 打 tag 开跑正式矩阵。
+
+### 2026-11-14 约 15:35–15:50 · yirran（协调人）+ Claude Code
+- 做了：拉取并检查队友的分支。B 的 `b/engine-stability` 合入 main（`bf4cc72`，CI 通过）；A 的 `a/agent` 合入 main（真实 LLM `qwen3.7-plus`、协议 Agent、`extra_body`）。`configs/benchmark/final.yaml` 改用 A 验证过的设置（tool 模式、单次输出上限 3000、`extra_body: {enable_thinking: false}`、每个 run 60 次请求和 30 万 Token），并按 A 实测的单个 LLM run 约 15 分钟更新了耗时估算：3 次重复串行约 3.3–3.8 小时，可以按任务拆成两个进程并行。HANDOFF 待办表已同步。
+- 验证：main、A、B 模拟合并后，锁定环境 75 passed，ruff 通过；A 分支的 CI 通过。这台 Mac 上没有 `.env`，所以 `final.yaml` 的开跑前检查如实报"没有配置 LLM"。
+- 问题：①下午这台 Mac 用电池、Docker 虚拟机又占着 CPU，训练慢了 2–5 倍；接上电源后恢复，但 Docker 仍占约 29% CPU，跑正式矩阵前要退出。②本地文件夹被做经验库的会话占用（`b/memory`，改动未提交），协调人的合并都在独立 worktree 里进行。
+- 下一步：把 Key 配到正式矩阵用的机器上，在这台机器上先测一个真实 LLM run 的耗时，再定重复次数和是否并行（19:00）。
+
 ### 2026-11-14 约 13:40–13:53 · yirran + Claude Code（分支 `c/demo-csv`）
 - 做了：演示数据 `examples/student_risk/`，用 UCI Student Performance 的葡语课程数据做"学年初预测期末不及格"：649 人，100 人不及格，CC BY 4.0。CSV **有意保留了 G1、G2、G3**（`build_demo_csv.py` 会下载、校验哈希后重新生成）。`card.yaml` 是标准答案：必须排除 G1、G2、G3，`absences` 是边界情况（统计的是本学年缺勤）。README 写了对话里的一句话描述、给 A 的打分规则和用法。TEAM 和 INTERFACES 8.1 已加上指引。
 - 验证：新增离线测试，用标准答案注册后恰好排除这 4 列；`test_csv_task.py` 7 个测试通过；ruff 通过。实跑（scripted，budgetlab，各 1 次）：正确协议的 holdout 是 0.649（0.551–0.745），只排除 G3 时是 0.890，所有字段都可用时是 1.000；每次约 20 秒。协议越错，分数越"好看"，适合现场演示"任务理解"的价值。
@@ -42,7 +53,7 @@
 - 下一步：交给 D；等 A 和 D 回复后做演示 CSV。
 
 ### 2026-11-14 约 12:33–12:42 · yirran + Claude Code（分支 `c/report-tables`）
-- 做了：成绩表新增两部分（`comparison.json` 和 `aggregate.md` 的两个新小节）。一是和参照系统（默认 random_search）的配对比较：同一任务、同一次重复的两个 run 比 holdout，胜/平/负的界线是两者校准 `min_effect` 中较大的那个，另外报 Token、墙钟、实验数的差值和"每 1000 Token 带来的 holdout 差"。二是成本效率：开发集相对基线的提升、每 1000 Token 的提升、每分钟的提升。`aggregate.csv` 末尾新增 `min_effect` 列；矩阵配置可以用 `reference_system` 更换参照系统。用新格式重新生成了已提交的 `results/dev-20261114T030336Z` 的汇总文件（原始运行证据没变）。HANDOFF 进度表同步更新。
+- 做了：成绩表新增两部分（`comparison.json` 和 `aggregate.md` 的两个新小节）。一是和参照系统（默认 random_search）的配对比较：同一任务、同一次重复的两个 run 比 holdout，胜/平/负的界线是两者校准 `min_effect` 中较大的那个，另外报 Token、用时、实验数的差值和"每 1000 Token 带来的 holdout 差"。二是成本效率：开发集相对基线的提升、每 1000 Token 的提升、每分钟的提升。`aggregate.csv` 末尾新增 `min_effect` 列；矩阵配置可以用 `reference_system` 更换参照系统。用新格式重新生成了已提交的 `results/dev-20261114T030336Z` 的汇总文件（原始运行证据没变）。HANDOFF 进度表同步更新。
 - 验证：`test_benchmark.py` 9 个测试通过（新增胜/平/负、未配对 run、出错 run、不花 Token 时效率为空的测试）；ruff 通过。
 - 说明：基线不在 holdout 上评测，所以"相对基线的提升"只能用开发集分数；系统之间的 holdout 比较用配对表。
 
@@ -53,11 +64,11 @@
 - 待决定：正式矩阵用哪个 LLM、预算多少（A 和协调人）；重复 3 次还是 5 次（19:00 定）。
 
 ### 2026-11-14 约 11:38–11:55 · yirran + Claude Code（分支 `c/second-task`）
-- 做了：第二个任务 **UCI Adult**（根据人口普查记录判断年收入是否超过 5 万美元；共 48,842 行，正例 24%）。适配器会自动下载并校验 `adult.data` 和 `adult.test` 的哈希，把两个文件合并后由我们自己重新切分（开发集 39,073 行，holdout 9,769 行），并把 `?` 转成缺失值。场景卡标注了 `fnlwgt`（抽样权重，不描述个人）、`education-num`（和 `education` 是同一信息），并在限制里写明 `race` 和 `sex` 是受保护属性。新增 `configs/adult.yaml`；`configs/benchmark/dev.yaml` 改为包含两个任务。
-- 验证：`tests/test_tasks.py` 3 个离线测试通过（场景卡覆盖所有列、读文件和标签清洗、未知标签拒绝）；锁定环境全套 49 passed；ruff 通过。
+- 做了：第二个任务 **UCI Adult**（根据人口普查记录判断年收入是否超过 5 万美元；共 48,842 行，正例 24%）。适配器会自动下载并校验 `adult.data` 和 `adult.test` 的哈希，把两个文件合并后由我们自己重新切分（开发集 39,073 行，holdout 9,769 行），并把 `?` 转成缺失值。任务说明标注了 `fnlwgt`（抽样权重，不描述个人）、`education-num`（和 `education` 是同一信息），并在限制里写明 `race` 和 `sex` 是受保护属性。新增 `configs/adult.yaml`；`configs/benchmark/dev.yaml` 改为包含两个任务。
+- 验证：`tests/test_tasks.py` 3 个离线测试通过（任务说明覆盖所有列、读文件和标签清洗、未知标签拒绝）；锁定环境全套 49 passed；ruff 通过。
 - Adult 小矩阵（scripted，1 次重复，未提交代码 `0ce4c7c-dirty`，结果放在临时目录、不入库；机器空闲时运行）：
 
-  | 系统 | 交付 | 开发最优 | holdout | 实验数 | 墙钟 |
+  | 系统 | 交付 | 开发最优 | holdout | 实验数 | 用时 |
   |---|---|---|---|---|---|
   | random_search | random-10 | 0.8154 | 0.8143 | 18 | 163.5 s |
   | budgetlab_no_schedule | r03-c1 | 0.7971 | 0.7941 | 6 | 135.4 s |
@@ -67,7 +78,7 @@
 - 下一步：为 20:00 的正式矩阵做准备（LLM 开跑前检查、final 配置、耗时估算）。
 
 ### 2026-11-14 约 11:15–11:35 · yirran + Claude Code（分支 `c/csv-task`）
-- 做了：通用 CSV 适配器 `budgetlab/tasks/csv_task.py`。`read_csv_any` 自动识别编码和分隔符；`validate_csv_for_task` 和 `register_csv_task` 给出中文拒绝理由，一次性列全；注册结果落盘在 `data/uploads/<task_id>/`；`config_for_upload` 生成研究配置。`tasks/__init__.py` 的 `get_task` 能通过 `register_data_root` 登记的数据根目录找到 `upload-*` 任务，`TaskDefinition` 支持从文件读取场景卡；`data.py` 的 `prepare_task` 和 `load_development` 会自动登记数据根目录。INTERFACES 8.2 已同步。
+- 做了：通用 CSV 适配器 `budgetlab/tasks/csv_task.py`。`read_csv_any` 自动识别编码和分隔符；`validate_csv_for_task` 和 `register_csv_task` 给出中文拒绝理由，一次性列全；注册结果落盘在 `data/uploads/<task_id>/`；`config_for_upload` 生成研究配置。`tasks/__init__.py` 的 `get_task` 能通过 `register_data_root` 登记的数据根目录找到 `upload-*` 任务，`TaskDefinition` 支持从文件读取任务说明；`data.py` 的 `prepare_task` 和 `load_development` 会自动登记数据根目录。INTERFACES 8.2 已同步。
 - 验证：`tests/test_csv_task.py` 6 个测试通过，其中一个是上传 CSV（GBK 编码、分号分隔、含中文列名、一个结果泄漏列和一个 ID 列）后完整跑研究和 holdout；锁定环境全套 46 passed；ruff 通过。
 - 真实数据试跑：把 UCI 原始的 `bank-additional-full.csv`（4.1 万行，分号分隔，带引号）当作用户上传，注册耗时 0.2 s，`duration` 按协议被排除；budgetlab（scripted，max_rounds 3）的结果和内置 Bank 任务完全一致：基线 0.6412 → 0.7098，确认通过，holdout 0.7099，用时 62 s。用 `job` 当目标列时被拒绝（"只支持二分类，有 12 个取值"）。
 - 下一步：合进 main，交给 D；然后做第二个任务。
@@ -76,7 +87,7 @@
 - 做了：在机器空闲时（不跑任何其他任务）重跑 Bank 开发矩阵 → `results/dev-20261114T030336Z`，代码版本为 `165a031`（非 dirty）。上一份受干扰的 `dev-20261114T024955Z` 已经移出仓库，不提交。
 - 结果（scripted，1 次重复，仅证明管道可用，不是性能结论）：
 
-  | 系统 | 交付 | holdout | 实验数 | fit | 墙钟 | 停止原因 |
+  | 系统 | 交付 | holdout | 实验数 | fit | 用时 | 停止原因 |
   |---|---|---|---|---|---|---|
   | random_search | random-05 | 0.7099 | 18 | 151 | 96.7 s | experiment_limit |
   | budgetlab_no_schedule | r02-c2 | 0.7099 | 8 | 101 | 68.8 s | no_valid_candidates |
@@ -88,13 +99,13 @@
 ### 2026-11-14 约 10:45–11:00 · yirran + Claude Code（分支 `c/benchmark`）
 - 做了：对照矩阵脚本 `budgetlab/benchmark.py`（`python -m budgetlab.benchmark`）。按"任务 → 重复 → 系统"串行运行，每个 run 结束后立即做一次 holdout 评测，复制三个结果文件到 `results/<matrix_id>/runs/`，每跑完一个 run 就重写 aggregate.csv/json/md；单个 slot 失败只记一行 error，不中断整个矩阵；支持 `--resume`（任务配置变了会拒绝）、`--dry-run`；`final` 矩阵要求 git 工作区干净。新增 `configs/benchmark/dev.yaml`；INTERFACES 5 增加 aggregate.md、末尾三列（slot_id、status、error）和 5.1 节矩阵配置格式。
 - 验证：`tests/test_benchmark.py` 通过（6 个 + 1 个溯源测试）；锁定环境全套 39 passed；ruff 通过。
-- Bank 开发矩阵 `results/dev-20261114T024955Z`（scripted，1 次重复）：3 个 slot 全部成功，三个系统都交付同一类方案（带类别权重的随机森林），holdout 均为 0.7099，全部 confirmed_pass。墙钟时间：random_search 203 s、no_schedule 143 s、budgetlab 94 s。
+- Bank 开发矩阵 `results/dev-20261114T024955Z`（scripted，1 次重复）：3 个 slot 全部成功，三个系统都交付同一类方案（带类别权重的随机森林），holdout 均为 0.7099，全部 confirmed_pass。实际用时：random_search 203 s、no_schedule 143 s、budgetlab 94 s。
 - 问题 1（已修）：这次矩阵的 `code_version` 记成了干净的 `2497875`，但当时 `benchmark.py` 是未跟踪的新文件。原因是 `provenance.git_info` 只检查已跟踪文件的改动。现在改为未被忽略的新文件也算 dirty，但 `results/`、`docs/` 和 `*.md` 不算（它们是输出和文档，不影响行为），并补了测试。**`provenance.py` 是 B 的文件，需要通知 B。**
-- 问题 2：这次矩阵运行期间同时在跑测试套件，耗时被干扰，**墙钟时间不能用于对比**。scripted 提案和随机搜索拿到同样的结果是预期之中的，这次只证明管道是通的。
+- 问题 2：这次矩阵运行期间同时在跑测试套件，耗时被干扰，**实际用时不能用于对比**。scripted 提案和随机搜索拿到同样的结果是预期之中的，这次只证明管道是通的。
 - 下一步：提交分支后，在不跑其他任务的情况下重跑一次开发矩阵（结果会带正确的代码版本），再把那份结果提交给 D 搭页面；本次的 `dev-20261114T024955Z` 不提交。
 
 ### 2026-11-14 约 10:35–10:40 · yirran（协调人）+ Claude Code
-- 决策：取消单独的"选预设任务 + 开始按钮"表单保底版，直接做对话式研究页。兜底改为在同一个对话页面里走"示例任务场景卡或人逐列确认 + scripted 提案"的路径，并且必须在 16:00 前可用。
+- 决策：取消单独的"选预设任务 + 开始按钮"表单保底版，直接做对话式研究页。兜底改为在同一个对话页面里走"示例任务任务说明或人逐列确认 + scripted 提案"的路径，并且必须在 16:00 前可用。
 - 改动：TEAM.md 4.1–4.4 和时间线（16:00 验收两条路径）；INTERFACES 8.1 的 `DraftProtocol` 增加 `source` 字段；HANDOFF 待办第 5、5b、7、9 项的截止时间提前到 16:00。
 
 ### 2026-11-14 约 10:30–10:35 · yirran（协调人）+ Claude Code

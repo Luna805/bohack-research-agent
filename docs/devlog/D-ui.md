@@ -1,11 +1,8 @@
 # 开发日志 · D · 展示与材料
 
-### 2026-11-14 · D + Codex · 对话与证据工作区调整
-
-- 做了：历史研究改为用户与助手消息；右栏可展开预览协议、契约、事件、预算、汇总、报告和近期实验文件，运行中自动刷新；分岔节点用模型和特征调整说明；颜色收敛为深色、浅色和荧光绿，保留缓慢极光与减少动态效果设置。
-- 验证：`ruff check budgetlab/ui tests/test_ui_insights.py`、`pytest -q tests/test_ui_insights.py tests/test_ui_presentation.py`（7 passed）；Streamlit AppTest 首页、历史研究、证据文件和对比页无异常。
-- 问题：当前执行环境无法完成浏览器视觉截图；`main` 上的新协议和问答功能仍待与 `d-ui` 合并。
-- 下一步：合并 `main` 后保留其新功能，再做完整回归和浏览器视觉检查。
+### 2026-11-14 约 18:30 · yirran（协调人）+ Claude Code · 把 `d-ui`（3e2bae8）合进 `main`
+- 做了：三栏布局、深色主题、研究路径分岔图、左侧 Token 面板和六阶段进度、右侧验证结果全部采用 D 的版本；`d-ui` 分支没有的 main 改动按 main 保留：LLM 开关（移到左侧研究目录）、协议 Agent 起草、开放问答、页面措辞（研究方案、数据列能否用来预测、快捷问题胶囊）、holdout 95% 区间，以及回答下的“相关文件”链接和只读查看页。Token 面板的说明改成：只统计本次研究的提案和审查，CSV 协议起草和开放问答另记在 `ui_state/`。
+- 验证：全量 pytest、ruff；本地浏览器看了首页、已完成 run 的追问和链接、历史 run、系统对比。
 
 ### 2026-11-14 · D + Codex · 精简研究工作区视觉
 
@@ -27,6 +24,11 @@
 - 验证：`python -m pytest -q`（64 passed）、`ruff check .`、`ruff format --check budgetlab tests`；Streamlit AppTest 检查首页、已完成 run、研究地图及系统对比，无异常。数据核对使用本地演示 run `20261114T072400Z-budgetlab-21f9e4`，非正式成绩。
 - 问题：当前没有可评测的 holdout 记录，故该面板尚未用真实 holdout 分数验收；参考图中与本项目无关的模型参数和示例统计量没有照搬。
 - 下一步：用浏览器核对窄屏与实际视觉效果；待正式结果产生后检查最终评测卡。A 的开放式协议与问答 Agent 到位后接入对话入口。
+
+### 2026-11-14 约 16:50–17:20 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`（代 D 接 LLM 路径，协调人要求）
+- 做了：① 侧边栏加"使用 LLM"开关：`.env` 有 `LLM_MODEL`、`LLM_API_KEY` 且装了 llm 依赖时默认打开，否则灰掉并说明原因（兜底路径不变）。开跑时 `--proposer llm`，配置写到 `ui_state/configs/<task>-llm.yaml`，LLM 预算和设置直接取正式矩阵 `configs/benchmark/final.yaml` 的 overrides（新文件 `budgetlab/ui/llm.py`）。② 上传 CSV：选好目标列和正类后，可以点"让协议 Agent 起草字段可用性"，草稿预填到逐列确认表里，`questions_for_user` 逐条显示；Agent 只看开发数据的画像（C 新增 `development_profile`，和 `prepare_task` 切出的开发集逐行一致），不看 holdout。演示 CSV 同时载入标准答案时，显示 Agent 和标准答案一致几个字段、漏排除了哪些。Token 记到 `ui_state/llm_calls.jsonl`。③ 研究结束后，底部对话框变成"追问"：开放问题交给 A 的问答 Agent，回答下面列出证据引用和逐个数字的核对结果（✅/⚠️），Token 记到 `ui_state/qa_calls.jsonl`，每个会话最多 20 次请求、5 万 Token。④ 研究结束时整页刷新一次，侧边栏会显示"研究已完成"；分数保留 4 位小数；holdout 显示 95% 区间；可用特征下限从 2 改成 1（B 已修引擎）。
+- 验证：锁定环境里页面打开；LLM 开关打开时预算卡片显示 `llm`（qwen3.7-plus，最多 60 次请求、300,000 Token）；关掉后脚本化 Bank 全程跑通。新增 `tests/test_ui_llm.py`。**页面里的真实 LLM 调用还没测**（要花钱，等协调人同意）。
+- 下一步：D 过一遍页面文案；现场演示前用真实 LLM 走一遍上传 → 起草 → 开跑 → 追问。
 
 ### 2026-11-14 · D + Codex · 同步演示数据并核对上传协议
 
@@ -78,7 +80,7 @@
 
 ### 2026-11-14 · D 页面初版
 
-- 新增 Streamlit 对话式研究页：场景卡确认、示例数据准备、脚本化研究启动、事件步骤卡、结果、一次性 holdout 按钮和 0 Token 快捷问答。
+- 新增 Streamlit 对话式研究页：任务说明确认、示例数据准备、脚本化研究启动、事件步骤卡、结果、一次性 holdout 按钮和 0 Token 快捷问答。
 - 新增只读证据访问层和快捷问题；读取 `runs/` 产物，不读取 sealed 数据。
 - 验证：在本仓库 `.venv` 安装 `.[dev,llm,ui]` 后，`pytest -q` 为 35 passed，`ruff check .` 和 `ruff format --check budgetlab tests` 均通过；Streamlit 服务能正常启动。浏览器内完整研究流程仍待人工验收。
 - 下一步：接入 A 的协议/问答 Agent 与 C 的通用 CSV 适配器；在干净环境运行全量 pytest 和页面演示。

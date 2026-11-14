@@ -20,7 +20,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest==7.4.4", "ruff>=0.8,<1"]
 llm = ["pydantic-ai-slim[openai]==2.68.0"]
-ui = ["streamlit>=1.40", "plotly>=5.24"]
+# pyarrow 26 requires numpy>=2 but numpy is pinned to 1.26.4, so the page could not load
+ui = ["streamlit>=1.40", "plotly>=5.24", "pyarrow>=14,<26"]
 
 [project.scripts]
 budgetlab = "budgetlab.cli:main"

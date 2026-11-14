@@ -1,17 +1,23 @@
-# OFFICIAL matrix (role C) - DRAFT until the 19:30 freeze; A confirms the llm/budget numbers.
-# Run only after the freeze, on one idle machine, from a clean checkout of the tag:
+# OFFICIAL matrix (role C) - draft until the 19:30 freeze.
+# LLM settings follow A's configs/llm-dev.yaml (qwen3.7-plus, tool output, thinking off). The model,
+# base URL and key come from .env on the machine that runs the matrix (LLM_MODEL, LLM_BASE_URL,
+# LLM_API_KEY); nothing secret goes in this file.
+#
+# Run only after the freeze, on one machine on AC power with Docker/VMs closed, from the tag:
 #   git checkout benchmark-freeze
 #   python -m budgetlab.benchmark --matrix configs/benchmark/final.yaml --dry-run   # preflight
 #   caffeinate -i python -m budgetlab.benchmark --matrix configs/benchmark/final.yaml
 # If it is interrupted:  python -m budgetlab.benchmark --resume <final-...>
 #
-# Size estimate (measured on the M-series Mac, scripted proposals, idle machine):
-#   Bank ~248 s and Adult ~444 s per repeat for all three systems -> ~11.5 min per repeat.
-#   LLM runs add model latency and may use all 8 rounds: assume 20-35 min per repeat.
-#   3 repeats -> roughly 60-100 min, well inside 20:00-00:30. Use 5 repeats if A measures
-#   fast responses (< 10 s per proposal) at 19:00.
+# Size estimate:
+#   - scripted/random runs (idle Mac on AC power): Bank ~100 s, Adult ~165 s each;
+#   - real LLM runs (A's measurements on Bank): ~850-930 s and 65k-100k tokens each, dominated by
+#     model latency; Adult is assumed similar or slightly longer.
+#   One repeat = 2 tasks x (1 random + 2 LLM systems) ~ 65-75 min; 3 repeats ~ 3.3-3.8 h serially.
+#   From 20:00 that ends around 23:30. If time gets short, run Bank and Adult as two processes
+#   (copy this file per task); model latency, not CPU, dominates the LLM runs.
 kind: final
-description: Bank Marketing and Adult, three systems, LLM proposals, three repeats
+description: Bank Marketing and Adult, three systems, LLM proposals (qwen3.7-plus), three repeats
 tasks:
   - name: bank_marketing
     config: configs/bank_marketing.yaml
@@ -23,8 +29,14 @@ proposer: llm
 repeat_seed_stride: 1000
 overrides:
   budget:                       # the same hard budget for every system (random_search uses 0 tokens)
-    max_llm_requests: 40        # per run: ~8 proposer + <=2 critic calls, each reserving 2 requests
-    max_llm_tokens: 300000      # per run; reservations are conservative, actual use is settled after
+    max_llm_requests: 60        # as in llm-dev.yaml; each call reserves 2 requests (1 retry)
+    max_llm_tokens: 300000      # per run; observed 65k-100k on Bank, reservations are conservative
   llm:
-    max_output_tokens: 2000     # A: confirm after probe-llm (non-thinking models need ~1-2k)
+    output_mode: tool
+    max_output_tokens: 3000     # A: 2000 was too small and caused empty rounds
     output_retries: 1
+    timeout_seconds: 120
+    extra_body:
+      enable_thinking: false    # qwen3.7-plus is a reasoning model; thinking off saves tokens and time
+    input_price_per_mtok: null  # fill in once A confirms pricing, otherwise cost stays unknown
+    output_price_per_mtok: null

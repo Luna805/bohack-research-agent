@@ -83,7 +83,8 @@ class SpecSampler:
         if self.rng.random() >= 0.5:
             return ()
         options: list[str] = []
-        if self.droppable:
+        # Dropping the only approved column would leave no features (the contract rejects it).
+        if self.droppable and len(self.contract.approved_feature_columns) > 1:
             options.append("drop")
         if self.skewed:
             options.append("log1p")

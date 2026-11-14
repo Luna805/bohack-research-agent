@@ -24,7 +24,7 @@ ruff check . && ruff format --check budgetlab tests
 2. **holdout 只在 `budgetlab/evaluation/` 里读**。研究代码只用 `load_development()`；不要打开或打印 `data/sealed/` 下的文件。
 3. **所有资源都走预算**。训练经过 `Runner.execute`；LLM 调用必须经过 `controller.metered_call`。没有返回 usage 的失败请求记为 unknown，不能记成 0。
 4. **契约在第一次提案前冻结**（`contract.json`）。之后不能修改 `min_effect`、切分、合法列和预算。
-5. **字段可用性只看场景卡**（`budgetlab/tasks/cards/*.yaml`）。不要在代码里硬编码"删掉某列"这类规则。
+5. **字段可用性只看任务说明**（`budgetlab/tasks/cards/*.yaml`）。不要在代码里硬编码"删掉某列"这类规则。
 6. **不能静默改实验**。规格不合法就拒绝并给出原因，不能偷偷降级或改参数后再跑。
 7. **每个结论都要能回溯**。新产物用 `atomic_write_json` 写入，并追加一条 ledger 事件。
 8. **标注要诚实**。`scripted` 不能说成 LLM；没测过的能力不写进 README 和 PPT；数字只取自 `summary.json` / `final_evaluation.json`。

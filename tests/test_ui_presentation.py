@@ -13,7 +13,7 @@ def test_event_card_uses_event_evidence():
             "details": {"approved_features": 19, "excluded_features": ["duration"]},
         }
     )
-    assert card["stage"] == "协议"
+    assert card["stage"] == "方案"
     assert "duration" in card["note"]
     assert event_card({"event_type": "budget_reserved"}) is None
 

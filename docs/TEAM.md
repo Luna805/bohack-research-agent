@@ -24,7 +24,7 @@
 |---|---|---|
 | A | `budgetlab/proposers.py`、`tests/test_llm_http.py`、各配置文件里的 `llm:` 段 | `budgetlab/agents/`（协议理解 `protocol_agent.py`）、`budgetlab/qa/agent.py`（问答 Agent）、`tests/test_agent_*.py`、`tests/test_qa_agent.py`、`configs/llm-*.yaml` |
 | B | `controller.py`、`state.py`、`budget.py`、`evaluator.py`、`schemas.py`、`contracts.py`、`runner.py`、`worker.py`、`pipeline.py`、`search.py`、`ledger.py`、`provenance.py`、`cli.py`、`tests/conftest.py` 及对应测试；**`pyproject.toml`、`uv.lock`、`.github/`** | `budgetlab/memory/`（经验库，P1）、`tests/test_engine_*.py` |
-| C | `budgetlab/tasks/`（含场景卡）、`data.py`、`profile.py`、`budgetlab/evaluation/`、`configs/bank_marketing.yaml` 中除 `llm:` 外的部分 | `budgetlab/benchmark.py`、`budgetlab/tasks/csv_task.py`（通用 CSV 适配器）、`examples/`（演示数据与标准答案）、`configs/benchmark/`、`results/`、`data/uploads/`（不入库）、`tests/test_benchmark*.py`、`tests/test_csv_task.py` |
+| C | `budgetlab/tasks/`（含任务说明）、`data.py`、`profile.py`、`budgetlab/evaluation/`、`configs/bank_marketing.yaml` 中除 `llm:` 外的部分 | `budgetlab/benchmark.py`、`budgetlab/tasks/csv_task.py`（通用 CSV 适配器）、`examples/`（演示数据与标准答案）、`configs/benchmark/`、`results/`、`data/uploads/`（不入库）、`tests/test_benchmark*.py`、`tests/test_csv_task.py` |
 | D | `reporting.py`、`README.md` | `budgetlab/ui/`（页面、后台启动器、步骤卡片）、`budgetlab/qa/evidence.py`、`budgetlab/qa/faq.py`、`ui_state/`（不入库）、`docs/presentation/`、`slides/`、`tests/test_ui*.py`、`tests/test_qa_faq.py` |
 | 协调人 | `docs/HANDOFF.md`、`docs/TEAM.md`、`docs/INTERFACES.md`、`AGENTS.md` | — |
 
@@ -45,7 +45,7 @@
 1. **（阻塞项）真实接口门禁**：拿到模型信息后，填 `.env`，在 `configs/llm-dev.yaml` 里设正数的 LLM 预算，跑 `probe-llm`。tool 模式不通就依次试 `native`、`prompted`。如果模型有思考模式，补上 `extra_body` 支持并关闭思考。
 2. 在 Bank 上跑 2–3 次 `--system budgetlab --proposer llm`，看提案质量：有没有引用证据、有没有重复、有没有用到 `pdays` 这类语义信息。
 3. 根据结果调整 `build_context` 和提示词，目标是上下文更短、提案更准。每次改动都要附上前后的 Token 对比。
-4. **协议理解 Agent**（原 P1，现在升级为对话式研究页的必需件）：输入一句话任务描述加字段画像（不带可用性标注），输出 `DraftProtocol`（INTERFACES 8.1），包括目标列、正类、预测时点、指标、每个字段能否使用及理由、需要向用户确认的问题。放在 `budgetlab/agents/protocol_agent.py`。在 Bank 上对照场景卡打分，记录首次正确率和成本。
+4. **协议理解 Agent**（原 P1，现在升级为对话式研究页的必需件）：输入一句话任务描述加字段画像（不带可用性标注），输出 `DraftProtocol`（INTERFACES 8.1），包括目标列、正类、预测时点、指标、每个字段能否使用及理由、需要向用户确认的问题。放在 `budgetlab/agents/protocol_agent.py`。在 Bank 上对照任务说明打分，记录首次正确率和成本。
 5. **问答 Agent** `budgetlab/qa/agent.py`：用 D 的证据工具（INTERFACES 8.4）回答开放问题，输出带证据引用的 `QAAnswer`；计量和研究预算分开。
 6. 没有 API 时：用 `FunctionModel` 和本地假服务器继续做第 3–5 项。
 
@@ -59,10 +59,10 @@
 ### C · 实验与评测
 1. **对照矩阵脚本** `python -m budgetlab.benchmark --matrix configs/benchmark/<名字>.yaml`：按"任务 × 系统 × 重复次数"依次跑 `run_research`，跑完对每个 run 统一调用 `evaluate_frozen_run`，按 INTERFACES 第 5 节的格式写入 `results/<matrix_id>/`。
 2. 先用 `--proposer scripted` 跑小矩阵（1 次重复）打通流程，再接入 A 的真实 LLM。
-3. 第二个任务：MLE-bench 最多试 1 小时；不行就换一个公开的二分类数据集（带场景卡），保证结论不只建立在一个数据集上。
+3. 第二个任务：MLE-bench 最多试 1 小时；不行就换一个公开的二分类数据集（带任务说明），保证结论不只建立在一个数据集上。
 4. **冻结后在一台机器上跑正式矩阵**，跑完把结果提交到 `results/`。
 5. 写数据和评测相关的限制说明，例如随机切分偏乐观，交给 D 放进报告。
-6. **通用 CSV 适配器** `budgetlab/tasks/csv_task.py`（给对话式研究页用）：接收用户上传的 CSV 和人确认过的场景卡，注册一个可以 `prepare` 和 `run_research` 的任务（INTERFACES 8.2）。只支持二分类、≤10 万行、≤200 列；不满足条件时给出清楚的拒绝理由。
+6. **通用 CSV 适配器** `budgetlab/tasks/csv_task.py`（给对话式研究页用）：接收用户上传的 CSV 和人确认过的任务说明，注册一个可以 `prepare` 和 `run_research` 的任务（INTERFACES 8.2）。只支持二分类、≤10 万行、≤200 列；不满足条件时给出清楚的拒绝理由。
 
 ### D · 展示与材料
 1. **对话式研究页** `budgetlab/ui/app.py`（Streamlit），直接做成对话式，不再单独做表单版。按第 4 节分阶段交付，**16:00 前对话主流程必须可用**，包括不依赖 LLM 的兜底路径。
@@ -94,8 +94,8 @@
 
 - **训练只在后台子进程里跑**（`python -m budgetlab.cli research ...`）。页面只负责读进度，刷新页面不能重复启动训练。
 - **聊天里的大模型不能触发任何操作**：开跑、评测、改配置都只能由人点按钮。大模型只负责起草协议和解释结果。
-- **字段可用性由人最终确认**：大模型的草稿只是建议，确认后的场景卡才会进入契约，草稿和最终版都要保存。
-- **兜底路径（没有 LLM，或 LLM 出错时）**：仍然是同一个对话页面，不另做表单版。示例任务直接使用已有场景卡生成协议卡片；新上传的 CSV 由人在协议卡片的表格里逐列确认；提案用 scripted；开放问答暂时只提供快捷问题。助手消息里明确标注「未使用 LLM」。**这条路径必须在 16:00 前可用**，它是现场没网、没额度时演示的唯一保障。
+- **字段可用性由人最终确认**：大模型的草稿只是建议，确认后的任务说明才会进入契约，草稿和最终版都要保存。
+- **兜底路径（没有 LLM，或 LLM 出错时）**：仍然是同一个对话页面，不另做表单版。示例任务直接使用已有任务说明生成协议卡片；新上传的 CSV 由人在协议卡片的表格里逐列确认；提案用 scripted；开放问答暂时只提供快捷问题。助手消息里明确标注「未使用 LLM」。**这条路径必须在 16:00 前可用**，它是现场没网、没额度时演示的唯一保障。
 - **任意 CSV 只支持二分类**：多分类、回归和时间切分在上传时就拒绝，并说明原因。
 - **网页跑出来的 run 不进正式成绩**：正式成绩只来自 C 在冻结版本上跑的 `results/final-*`。网页的 run 写到 `runs/` 下，`run_config.json` 里的 `system` 和 `proposal_source` 照常记录。
 
@@ -131,7 +131,7 @@
 - 不要在 GitHub 网页上传整包文件（之前 `research-agent-hyf` 分支就是这样坏掉的）。统一用 git 命令提交。
 
 ### 6.2 接口变更
-- 接口指的是 INTERFACES.md 里列出的东西：run 目录格式、`run_research` 签名、Proposer 协议、场景卡格式、`results/` 格式，以及对话式研究页的对接（第 8 节）。
+- 接口指的是 INTERFACES.md 里列出的东西：run 目录格式、`run_research` 签名、Proposer 协议、任务说明格式、`results/` 格式，以及对话式研究页的对接（第 8 节）。
 - **只加字段，不改名、不删字段**。确实要破坏性修改时，先在群里说，同时提升对应的版本号（例如 `summary_version`），并同步更新 INTERFACES.md。
 
 ### 6.3 冲突处理

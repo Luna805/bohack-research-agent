@@ -185,6 +185,16 @@ def provisional_contract(protocol: ProtocolSpec, manifest_hash: str) -> TaskCont
     )
 
 
+def finalization_reserve(protocol: ProtocolSpec) -> ResourceVector:
+    """Reserve confirmation pairs plus one final refit before exploration begins."""
+    confirmation_runs = 2 * len(protocol.confirmation_split_seeds)
+    return ResourceVector(
+        experiments=confirmation_runs + 1,
+        fits=confirmation_runs * protocol.cv_folds + 1,
+        seconds=(confirmation_runs + 1) * protocol.budgets.experiment_timeout_seconds,
+    )
+
+
 def setup_run(
     config: dict[str, Any],
     system: str,
@@ -238,11 +248,7 @@ def setup_run(
     )
     split_value, manifest_hash = split_manifest(bundle, seeds, protocol.cv_folds)
     atomic_write_json(run_dir / "split_manifest.json", split_value)
-    tail = ResourceVector(
-        experiments=7,
-        fits=6 * protocol.cv_folds + 1,
-        seconds=7 * min(protocol.budgets.experiment_timeout_seconds, 60),
-    )
+    tail = finalization_reserve(protocol)
     budget = Budget(protocol.budgets, run_dir / "budget.json", ledger, tail_reserve=tail)
     provisional = provisional_contract(protocol, manifest_hash)
     runner = Runner(run_dir, ledger, budget, data_root)
@@ -472,9 +478,15 @@ def metered_call(
     context_ref = f"llm/{role}-r{round_index:02d}.context.json"
     atomic_write_json(ctx.run_dir / context_ref, context)
     ctx.ledger.append("llm_call_started", action_id=action_id, artifact_ref=context_ref)
-    outcome: CallOutcome = call(context)
-    if metered:
-        ctx.budget.settle(action_id, outcome.usage, unknown=outcome.unknown)
+    try:
+        outcome: CallOutcome = call(context)
+    except Exception:
+        if metered:
+            ctx.budget.mark_interrupted_unknown(action_id)
+        raise
+    else:
+        if metered:
+            ctx.budget.settle(action_id, outcome.usage, unknown=outcome.unknown)
     output_ref = None
     if outcome.output is not None:
         output_ref = f"llm/{role}-r{round_index:02d}.output.json"
@@ -526,8 +538,8 @@ def screen_candidates(
             state.duplicates_blocked += 1
         elif candidate.hypothesis.comparator_experiment_id not in known:
             reason = f"unknown comparator {candidate.hypothesis.comparator_experiment_id}"
-        elif not set(candidate.hypothesis.evidence_refs) & allowed_refs:
-            reason = "no valid evidence_refs"
+        elif not set(candidate.hypothesis.evidence_refs).issubset(allowed_refs):
+            reason = "one or more evidence_refs are unavailable"
         else:
             try:
                 validate_experiment_spec(
@@ -1007,6 +1019,26 @@ def make_agents(config: dict[str, Any], proposer_kind: str) -> tuple[Proposer, C
     raise ValueError(f"unknown proposer kind: {proposer_kind}")
 
 
+def _record_run_failure(ctx: RunContext, phase: str, exc: Exception) -> None:
+    """Close outstanding reservations and leave explicit failure-terminal evidence."""
+    pending = [
+        action_id
+        for action_id, reservation in ctx.budget.reservations.items()
+        if reservation["status"] == "reserved"
+    ]
+    for action_id in pending:
+        ctx.budget.mark_interrupted_unknown(action_id)
+    ctx.ledger.append(
+        "run_failed",
+        reason_code="exception",
+        details={
+            "exception_type": type(exc).__name__,
+            "phase": phase,
+            "budget": ctx.budget.summary(),
+        },
+    )
+
+
 def run_research(
     config: dict[str, Any],
     system: str,
@@ -1024,20 +1056,27 @@ def run_research(
         critic = critic or default_critic
     source = "none" if system == "random_search" else proposer.source  # type: ignore[union-attr]
     ctx, state = setup_run(config, system, runs_root, data_root, source)
-    if system == "random_search":
-        explore_random(ctx, state)
-    else:
-        explore_loop(
-            ctx,
-            state,
-            proposer,
-            critic,
-            schedule=system == "budgetlab",  # type: ignore[arg-type]
-        )
-    summary = finalize(ctx, state)
-    write_report(ctx.run_dir, summary)
-    ctx.ledger.append("run_terminal", artifact_ref="summary.json", reason_code="completed")
-    return summary
+    phase = "exploration"
+    try:
+        if system == "random_search":
+            explore_random(ctx, state)
+        else:
+            explore_loop(
+                ctx,
+                state,
+                proposer,
+                critic,
+                schedule=system == "budgetlab",  # type: ignore[arg-type]
+            )
+        phase = "finalize"
+        summary = finalize(ctx, state)
+        phase = "report"
+        write_report(ctx.run_dir, summary)
+        ctx.ledger.append("run_terminal", artifact_ref="summary.json", reason_code="completed")
+        return summary
+    except Exception as exc:
+        _record_run_failure(ctx, phase, exc)
+        raise
 
 
 def reproduce_run(run_id: str, runs_root: Path = Path("runs")) -> dict[str, Any]:

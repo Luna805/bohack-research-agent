@@ -238,6 +238,42 @@ def load_uploaded_task(upload_dir: Path) -> TaskDefinition:
     )
 
 
+def development_rows(
+    csv_path: Path, target_column: str, positive_label: str
+) -> tuple[pd.DataFrame, pd.Series]:
+    """The rows ``prepare_task`` will keep for development, reproduced before registration.
+
+    The holdout split depends only on the row order, the encoded target and a fixed seed, never
+    on the protocol, so the page can show the protocol agent development data only and keep the
+    future holdout rows out of its context (INTERFACES 8.1).
+    """
+    from sklearn.model_selection import train_test_split
+
+    frame = read_csv_any(csv_path)
+    raw_target = frame.pop(target_column)
+    target = (raw_target.astype(str).str.strip() == str(positive_label).strip()).astype(int)
+    development, _ = train_test_split(
+        list(range(len(frame))),
+        test_size=HOLDOUT_FRACTION,
+        stratify=target,
+        random_state=HOLDOUT_SEED,
+    )
+    keep = sorted(development)
+    features = frame.iloc[keep].reset_index(drop=True)
+    return features, target.iloc[keep].reset_index(drop=True).rename(target_column)
+
+
+def development_profile(
+    csv_path: Path, target_column: str, positive_label: str
+) -> tuple[list[str], dict[str, Any]]:
+    """Column list (with the target) and a development-only profile for the protocol agent."""
+    from ..profile import profile_development
+
+    features, target = development_rows(csv_path, target_column, positive_label)
+    unlabeled = {"fields": [{"name": name, "availability": "available"} for name in features]}
+    return [*features.columns, target_column], profile_development(features, target, unlabeled)
+
+
 def config_for_upload(task_id: str, base_config: dict[str, Any]) -> dict[str, Any]:
     """Research config for an uploaded task: the base config with this task id swapped in."""
     config = json.loads(json.dumps(base_config))

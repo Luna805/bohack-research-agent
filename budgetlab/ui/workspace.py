@@ -41,7 +41,10 @@ def render_token_panel(run_dir: Path | None) -> None:
         for label, role in (("提案", "proposer"), ("审查", "critic")):
             role_data = ledger["by_role"].get(role, {})
             st.write(f"{label} · {role_data.get('tokens', 0):,} Token")
-        st.caption("协议确认、程序实验和快捷问答均不调用 LLM。")
+        st.caption(
+            "只统计本次研究的提案和审查。CSV 协议起草和开放问答的 Token 另记在 ui_state/；"
+            "程序实验和快捷问答不调用 LLM。"
+        )
     if ledger["by_round"]:
         with st.expander(f"逐次调用明细（{len(ledger['by_round'])}）"):
             st.dataframe(ledger["by_round"], hide_index=True, alt="每轮提案和审查的 Token 使用记录")
