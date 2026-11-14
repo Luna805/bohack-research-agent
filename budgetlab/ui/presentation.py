@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 EVENT_STAGES = {
-    "protocol_accepted": ("协议", "研究协议已确认"),
+    "protocol_accepted": ("方案", "研究方案已确认"),
     "profile_written": ("数据", "数据画像完成"),
     "baseline_completed": ("基线", "基线训练完成"),
     "calibration_completed": ("基线", "提升门槛已标定"),

@@ -193,6 +193,22 @@ def show_timeline(cards: list[dict], run_dir: Path, *, key: str) -> None:
                 st.json(card["raw"])
 
 
+def show_quick_questions(run_id: str, *, key: str) -> None:
+    """Zero-token quick questions as light chips in one row; the chosen one is answered below."""
+    chosen = st.pills(
+        "快捷问题（不花 Token）",
+        list(QUICK_QUESTIONS),
+        format_func=QUICK_QUESTIONS.get,
+        key=key,
+        label_visibility="collapsed",
+    )
+    if chosen:
+        answer = answer_quick(chosen, run_id, STORE)
+        with st.chat_message("assistant"):
+            st.write(answer["answer"])
+            st.caption(f"证据：runs/{run_id}/summary.json · 0 Token")
+
+
 def reset_task_draft() -> None:
     for key in (
         "request",
@@ -517,7 +533,7 @@ with st.sidebar:
         if active_run_id and (RUNS / active_run_id / "summary.json").is_file():
             st.success("研究已完成")
             if st.button("开始另一个任务"):
-                for key in ("job", "request", "protocol_confirmed", "faq_answer", "qa_pending"):
+                for key in ("job", "request", "protocol_confirmed", "qa_pending"):
                     st.session_state.pop(key, None)
                 st.rerun()
     else:
@@ -553,15 +569,7 @@ if history_id != "开始新研究":
                 st.error(error)
             else:
                 st.rerun()
-        for question_id, question in QUICK_QUESTIONS.items():
-            if st.button(question, key=f"history-faq-{history_id}-{question_id}"):
-                st.session_state["history_faq"] = (
-                    history_id,
-                    answer_quick(question_id, history_id, STORE),
-                )
-        if (saved := st.session_state.get("history_faq")) and saved[0] == history_id:
-            st.write(saved[1]["answer"])
-            st.caption(f"证据：runs/{history_id}/summary.json · 0 Token")
+        show_quick_questions(history_id, key=f"history-faq-{history_id}")
     else:
         st.info("这次研究还没有最终汇总，可能正在运行，也可能已中断。步骤仍可查看。")
     cards = [card for item in read_events(history_dir) if (card := event_card(item))]
@@ -637,34 +645,41 @@ with st.chat_message("assistant"):
     if task_id.startswith("upload-"):
         st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
     else:
-        st.write("请确认研究协议。以下内容来自所选示例的场景卡，不是对输入文字的自动解析。")
+        st.write("请确认研究方案。以下是该示例的任务说明。")
     st.write(f"**任务：** {card['title']}")
     st.write(f"**预测时点：** {card['prediction_time']}")
     st.write(f"**目标列：** {card['target']['column']}（正类：{card['target']['positive_label']}）")
     st.write(f"**指标：** {config.get('primary_metric', 'f1_macro')}")
     fields = card["fields"]
-    excluded = [field["name"] for field in fields if field["availability"] != "available"]
-    if excluded:
-        st.warning(f"预测时不能使用：{', '.join(excluded)}。请在确认前核对原因。")
-    elif card.get("default_availability"):
-        st.caption("此示例按场景卡的默认规则使用字段，具体列由数据准备阶段确定。")
-    with st.expander(f"查看字段依据（{len(fields)} 项）"):
+    usable = {
+        "available": "✅ 可以用",
+        "post_outcome": "❌ 不能用：结果出来后才知道",
+        "identifier": "➖ 不用：只是编号",
+    }
+    count = f"（共 {len(fields)} 列）" if fields else ""
+    with st.expander(f"哪些数据列可以用来预测{count}"):
         if fields:
+            # Columns that cannot be used come first so they are easy to check.
+            ordered = sorted(fields, key=lambda field: field["availability"] == "available")
             st.dataframe(
                 [
                     {
-                        "字段": field["name"],
-                        "可用性": field["availability"],
-                        "理由": field.get("note", field.get("description", "")),
+                        "数据列": field["name"],
+                        "能否用来预测": usable.get(field["availability"], field["availability"]),
+                        "说明": field.get("note", field.get("description", "")),
                     }
-                    for field in fields
+                    for field in ordered
                 ],
                 hide_index=True,
-                alt="示例任务各字段的可用性及原因",
+                alt="示例任务的每个数据列能否用来预测，以及说明",
             )
+        elif card.get("default_availability") == "available":
+            st.write("这个示例的所有数据列都可以用来预测。")
         else:
-            st.write("该示例使用场景卡的默认字段可用性规则。")
-    confirmed = st.checkbox("我确认目标列、预测时点和字段可用性", key="protocol_confirmed")
+            st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
+    confirmed = st.checkbox(
+        "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
+    )
 
 with st.chat_message("assistant"):
     run_config = research_config(config, proposer, ROOT)
@@ -773,17 +788,7 @@ def show_active_run() -> None:
             else:
                 st.rerun(scope="fragment")
 
-    for question_id, question in QUICK_QUESTIONS.items():
-        if st.button(question, key=f"faq-{question_id}"):
-            st.session_state["faq_answer"] = (
-                run_dir.name,
-                answer_quick(question_id, run_dir.name, STORE),
-            )
-    saved_answer = st.session_state.get("faq_answer")
-    if saved_answer and saved_answer[0] == run_dir.name:
-        with st.chat_message("assistant"):
-            st.write(saved_answer[1]["answer"])
-            st.caption(f"证据：runs/{run_dir.name}/summary.json · 0 Token")
+    show_quick_questions(run_dir.name, key=f"faq-{run_dir.name}")
 
 
 def ask_open_question(run_id: str, question: str, thread: list[dict]) -> dict:
