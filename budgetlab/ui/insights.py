@@ -131,6 +131,7 @@ def experiment_rows(run_dir: Path, summary: dict[str, Any]) -> list[dict[str, An
                 "origin": compact.get("origin"),
                 "verdict": compact.get("baseline_verdict"),
                 "hypothesis": compact.get("hypothesis"),
+                "spec": compact.get("spec") or detail.get("spec") or {},
                 "parent": compact.get("hypothesis_comparator") or detail.get("previous_best_id"),
             }
         )
@@ -146,11 +147,14 @@ def branch_tree(rows: list[dict[str, Any]], delivered_id: str | None) -> dict[st
     roots: list[dict[str, Any]] = []
     for row in rows:
         verdict = row.get("verdict")
-        label = {
-            "baseline": "基线模型",
-            "tool_search": "程序搜索",
-            "proposer": "实验假设",
-        }.get(row.get("origin"), "实验尝试")
+        model = (row.get("spec") or {}).get("model") or {}
+        family = {
+            "logistic_regression": "逻辑回归",
+            "random_forest": "随机森林",
+            "hist_gradient_boosting": "梯度提升树",
+        }.get(model.get("family"), "模型实验")
+        actions = (row.get("spec") or {}).get("feature_actions") or []
+        action = " + 特征调整" if actions else ""
         outcome = (
             "最终采用"
             if row["id"] == delivered_id
@@ -158,14 +162,14 @@ def branch_tree(rows: list[dict[str, Any]], delivered_id: str | None) -> dict[st
             if verdict == "candidate_pass"
             else "继续探索"
         )
-        color = (
-            "#B8FF65"
-            if row["id"] == delivered_id
-            else ("#F4F7FB" if verdict == "candidate_pass" else "#8A949F")
-        )
+        color = "#B8FF65" if row["id"] == delivered_id else "#F4F7FB"
         nodes[row["id"]] = {
-            "name": f"{label} · {row['id']}\n{outcome}",
-            "itemStyle": {"color": color, "borderColor": "#0B1018"},
+            "name": f"{family}{action}\n{outcome} · {row['id']}",
+            "itemStyle": {
+                "color": color,
+                "borderColor": "#0B1018",
+                "opacity": 0.4 if verdict != "candidate_pass" and row["id"] != delivered_id else 1,
+            },
             "children": [],
             "value": explain_experiment(row, delivered_id),
         }
@@ -199,8 +203,8 @@ def branch_chart_spec(tree: dict[str, Any]) -> dict[str, Any]:
                 "roam": True,
                 "expandAndCollapse": True,
                 "initialTreeDepth": 5,
-                "lineStyle": {"color": "#8A949F", "width": 1},
-                "label": {"position": "top", "fontSize": 11, "color": "#EAF2FA"},
+                "lineStyle": {"color": "#F4F7FB", "opacity": 0.4, "width": 1},
+                "label": {"position": "top", "fontSize": 11, "color": "#F4F7FB"},
                 "leaves": {"label": {"position": "bottom"}},
                 "animationDurationUpdate": 300,
             }
