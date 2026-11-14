@@ -1367,6 +1367,15 @@ def show_workspace(run_id: str | None, running: bool, highlight: set[str], tall:
             )
             if running:
                 st.caption(":green[●] 每 2 秒更新")
+            st.space("stretch")
+            st.button(
+                ":material/right_panel_close:",
+                key="ws-close",
+                help="收起右侧工作区",
+                type="tertiary",
+                on_click=toggle,
+                args=("ws_hidden",),
+            )
         tab = st.session_state.get("ws_tab") or "文件"
         with st.container(key="ws_body"):
             if run_id is None:
@@ -1821,7 +1830,8 @@ st.html("""<style>
 code {font-variant-numeric: tabular-nums;}
 </style>""")
 
-for key, value in (("ws_tab", "文件"), ("page", "research"), ("panel_open", True)):
+DEFAULTS = {"ws_tab": "文件", "page": "research", "panel_open": True, "drawer": True}
+for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
 if "ws_tab_next" in st.session_state:
     st.session_state["ws_tab"] = st.session_state.pop("ws_tab_next")
@@ -1846,7 +1856,7 @@ running = bool(focus and job_dir and focus == job_dir.name and busy)
 starting = bool(job and job_dir is None and not view_run)
 finished_focus = bool(focus and (RUNS / focus / "summary.json").is_file())
 
-drawer_open = st.session_state.get("drawer", False)
+drawer_open = st.session_state["drawer"]
 ws_hidden = st.session_state.get("ws_hidden", False)
 widths = ([0.62] if drawer_open else []) + [1.35] + ([] if ws_hidden else [1.0])
 columns = st.columns(widths, gap="small")
@@ -1957,15 +1967,16 @@ with head:
     st.markdown(f"**{title}**")
     if badge:
         st.badge(badge[0], color=badge[1])
-    st.space("stretch")
-    st.button(
-        ":material/right_panel_open:" if ws_hidden else ":material/right_panel_close:",
-        key="ws-toggle",
-        help="显示工作区" if ws_hidden else "隐藏工作区",
-        type="tertiary",
-        on_click=toggle,
-        args=("ws_hidden",),
-    )
+    if ws_hidden:
+        st.space("stretch")
+        st.button(
+            ":material/right_panel_open:",
+            key="ws-open",
+            help="展开右侧工作区",
+            type="tertiary",
+            on_click=toggle,
+            args=("ws_hidden",),
+        )
 
 if not ws_hidden:
     highlight: set[str] = set()
