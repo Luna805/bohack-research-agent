@@ -10,6 +10,12 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 11:15–11:35 · yirran + Claude Code（分支 `c/csv-task`）
+- 做了：通用 CSV 适配器 `budgetlab/tasks/csv_task.py`。`read_csv_any` 自动识别编码和分隔符；`validate_csv_for_task` 和 `register_csv_task` 给出中文拒绝理由，一次性列全；注册结果落盘在 `data/uploads/<task_id>/`；`config_for_upload` 生成研究配置。`tasks/__init__.py` 的 `get_task` 能通过 `register_data_root` 登记的数据根目录找到 `upload-*` 任务，`TaskDefinition` 支持从文件读取场景卡；`data.py` 的 `prepare_task` 和 `load_development` 会自动登记数据根目录。INTERFACES 8.2 已同步。
+- 验证：`tests/test_csv_task.py` 6 个测试通过，其中一个是上传 CSV（GBK 编码、分号分隔、含中文列名、一个结果泄漏列和一个 ID 列）后完整跑研究和 holdout；锁定环境全套 46 passed；ruff 通过。
+- 真实数据试跑：把 UCI 原始的 `bank-additional-full.csv`（4.1 万行，分号分隔，带引号）当作用户上传，注册耗时 0.2 s，`duration` 按协议被排除；budgetlab（scripted，max_rounds 3）的结果和内置 Bank 任务完全一致：基线 0.6412 → 0.7098，确认通过，holdout 0.7099，用时 62 s。用 `job` 当目标列时被拒绝（"只支持二分类，有 12 个取值"）。
+- 下一步：合进 main，交给 D；然后做第二个任务。
+
 ### 2026-11-14 约 11:03–11:08 · yirran + Claude Code（分支 `c/benchmark`）
 - 做了：在机器空闲时（不跑任何其他任务）重跑 Bank 开发矩阵 → `results/dev-20261114T030336Z`，代码版本为 `165a031`（非 dirty）。上一份受干扰的 `dev-20261114T024955Z` 已经移出仓库，不提交。
 - 结果（scripted，1 次重复，仅证明管道可用，不是性能结论）：

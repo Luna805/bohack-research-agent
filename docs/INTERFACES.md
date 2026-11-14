@@ -255,13 +255,26 @@ class DraftProtocol(BaseModel):
 
 ```python
 # budgetlab/tasks/csv_task.py
-register_csv_task(csv_path: Path, card: dict, data_root: Path) -> str   # 返回 task_id，例如 "upload-<8位哈希>"
-validate_csv_for_task(csv_path: Path, target_column: str) -> list[str]  # 返回拒绝理由，空列表表示可以
+read_csv_any(csv_path) -> pd.DataFrame          # 自动识别编码（UTF-8 / UTF-8 BOM / GBK / Latin-1）和分隔符（, ; Tab |）
+validate_csv_for_task(csv_path, target_column) -> list[str]   # 上传后、起草协议前先检查；空列表表示可以
+register_csv_task(csv_path, card: dict, data_root) -> str     # 人确认协议后调用；返回 "upload-<10位哈希>"
+config_for_upload(task_id, base_config: dict) -> dict          # 基于某个配置（如 configs/bank_marketing.yaml）换成这个任务
+class CsvTaskError(ValueError): reasons: list[str]             # register 失败时一次性给出全部理由（中文，可直接展示）
 ```
 
-- 注册的结果要**落到文件**，写到 `data/uploads/<task_id>/`（数据副本、`card.yaml`、`task.json`）。这样 `get_task(task_id)` 在训练子进程里也能找到它，C 负责让 `get_task` 能从这个目录发现上传的任务。
-- 注册后照常用 `prepare_task(task_id, data_root)` 切出密封 holdout，再交给 `run_research`。
-- 拒绝的条件：目标列不是两个取值、行数超过 10 万、列数超过 200、某一类样本数少于折数，或者确认后没有任何可用特征。
+D 的调用顺序：
+```python
+reasons = validate_csv_for_task(path, target)        # 有理由就直接在对话里展示并停下
+task_id = register_csv_task(path, confirmed_card, Path("data"))   # 失败时抛 CsvTaskError
+prepare_task(task_id, Path("data"))                  # 切出密封 holdout（20%，分层，固定种子）
+config = config_for_upload(task_id, yaml.safe_load(open("configs/bank_marketing.yaml")))
+# 把 config 写到 ui_state/configs/<task_id>.yaml，再用子进程跑 research（8.3）
+```
+
+- `card` 的格式同第 4 节的场景卡，另外可以带 `primary_metric`（默认 `f1_macro`）。`task_id` 由 C 生成，不需要传入。`fields` 必须覆盖除目标列以外的每一列。
+- 同一份 CSV 加同一份确认后的协议，得到的 `task_id` 相同（可以重复注册）；协议有任何改动，就会得到新的 `task_id`。
+- 注册结果落盘在 `<data_root>/uploads/<task_id>/`：`data.csv`（统一转为 UTF-8、逗号分隔）、`card.yaml`、`task.json`。`get_task(task_id)` 通过 `register_data_root` 登记过的数据根目录查找上传任务（`prepare_task` 和 `load_development` 会自动登记），找不到时再依次查 `<项目>/data` 和 `<当前目录>/data`，所以训练子进程也能找到。`data/uploads/` 不进 git。
+- 拒绝条件（理由用中文，可以直接展示）：读不了文件；目标列不存在、有缺失值、或不是正好两个取值；少数类少于 10 行；超过 10 万行或 200 列；协议缺少必填字段；正类不是目标列的取值之一；有列没写明能否使用、或可用性的值不合法；确认后没有可用特征；某个可用的类别列不同取值超过 1000 个（高基数类别或文本列暂不支持，请标成 `identifier`）。
 
 ### 8.3 后台运行与进度（D 实现，读取第 1 节的 run 目录）
 
