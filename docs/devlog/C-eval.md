@@ -10,6 +10,20 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 11:38–11:55 · yirran + Claude Code（分支 `c/second-task`）
+- 做了：第二个任务 **UCI Adult**（根据人口普查记录判断年收入是否超过 5 万美元；共 48,842 行，正例 24%）。适配器会自动下载并校验 `adult.data` 和 `adult.test` 的哈希，把两个文件合并后由我们自己重新切分（开发集 39,073 行，holdout 9,769 行），并把 `?` 转成缺失值。场景卡标注了 `fnlwgt`（抽样权重，不描述个人）、`education-num`（和 `education` 是同一信息），并在限制里写明 `race` 和 `sex` 是受保护属性。新增 `configs/adult.yaml`；`configs/benchmark/dev.yaml` 改为包含两个任务。
+- 验证：`tests/test_tasks.py` 3 个离线测试通过（场景卡覆盖所有列、读文件和标签清洗、未知标签拒绝）；锁定环境全套 49 passed；ruff 通过。
+- Adult 小矩阵（scripted，1 次重复，未提交代码 `0ce4c7c-dirty`，结果放在临时目录、不入库；机器空闲时运行）：
+
+  | 系统 | 交付 | 开发最优 | holdout | 实验数 | 墙钟 |
+  |---|---|---|---|---|---|
+  | random_search | random-10 | 0.8154 | 0.8143 | 18 | 163.5 s |
+  | budgetlab_no_schedule | r03-c1 | 0.7971 | 0.7941 | 6 | 135.4 s |
+  | budgetlab | tool-02 | 0.8147 | 0.8151 | 8 | 145.3 s |
+
+  基线是 0.7792，三个系统都 confirmed_pass。观察：脚本化提案器的规则是照着 Bank 写的，在 Adult 上 4 个假设都没达到门槛；完整版靠规则触发的随机搜索找到了 HGB 方案，比 no_schedule 高约 0.02。这只是单次运行，**不是结论**，但说明"提案器弱的时候调度能兜底"，也说明提案需要真正理解数据——这正是真实 LLM 应该体现价值的地方。
+- 下一步：为 20:00 的正式矩阵做准备（LLM 开跑前检查、final 配置、耗时估算）。
+
 ### 2026-11-14 约 11:15–11:35 · yirran + Claude Code（分支 `c/csv-task`）
 - 做了：通用 CSV 适配器 `budgetlab/tasks/csv_task.py`。`read_csv_any` 自动识别编码和分隔符；`validate_csv_for_task` 和 `register_csv_task` 给出中文拒绝理由，一次性列全；注册结果落盘在 `data/uploads/<task_id>/`；`config_for_upload` 生成研究配置。`tasks/__init__.py` 的 `get_task` 能通过 `register_data_root` 登记的数据根目录找到 `upload-*` 任务，`TaskDefinition` 支持从文件读取场景卡；`data.py` 的 `prepare_task` 和 `load_development` 会自动登记数据根目录。INTERFACES 8.2 已同步。
 - 验证：`tests/test_csv_task.py` 6 个测试通过，其中一个是上传 CSV（GBK 编码、分号分隔、含中文列名、一个结果泄漏列和一个 ID 列）后完整跑研究和 holdout；锁定环境全套 46 passed；ruff 通过。
