@@ -14,6 +14,8 @@ from budgetlab.tasks import csv_task, get_task
 from budgetlab.tasks.csv_task import (
     CsvTaskError,
     config_for_upload,
+    development_profile,
+    development_rows,
     read_csv_any,
     register_csv_task,
     task_id_for,
@@ -184,3 +186,21 @@ def test_demo_upload_and_answer_key_register_offline(tmp_path) -> None:
     bundle = load_development(task_id, tmp_path / "data")
     assert set(bundle.target.unique()) == {0, 1}
     assert bundle.target.mean() == pytest.approx(100 / 649, abs=0.02)  # 1 = "fail"
+
+
+def test_development_rows_match_the_prepared_split(tmp_path) -> None:
+    """The protocol agent's profile must come from exactly the rows prepare_task keeps."""
+    frame = _frame()
+    path = _write(frame, tmp_path / "upload.csv", sep=";", encoding="gbk")
+    features, target = development_rows(path, "diagnosis", "malignant")
+    columns, profile = development_profile(path, "diagnosis", "malignant")
+    assert columns[-1] == "diagnosis" and "diagnosis" not in features.columns
+    assert profile["rows"] == len(features)
+
+    task_id = register_csv_task(path, _card(frame), tmp_path / "data")
+    manifest = prepare_task(task_id, tmp_path / "data")
+    bundle = load_development(task_id, tmp_path / "data")
+    assert manifest["development_rows"] == len(features)
+    assert target.tolist() == bundle.target.tolist()
+    assert features["f0"].tolist() == pytest.approx(bundle.features["f0"].tolist())
+    assert features["patient_id"].tolist() == bundle.features["patient_id"].tolist()
