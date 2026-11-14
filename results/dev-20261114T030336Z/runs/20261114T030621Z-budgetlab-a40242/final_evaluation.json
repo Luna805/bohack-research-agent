@@ -1,0 +1,11 @@
+{
+  "delivered_experiment_id": "r02-c2",
+  "dev_minus_holdout": -0.00011232047525455702,
+  "development_cv_score": 0.7097981281650848,
+  "evaluated_at": "2026-11-14T03:07:44.420009+00:00",
+  "holdout_rows": 8238,
+  "holdout_score": 0.7099104486403394,
+  "metric": "f1_macro",
+  "model_hash": "7b1e89a096b8a75e44e97576bc0f57b8fd156c2bd13721cf89032312f4f06004",
+  "run_id": "20261114T030621Z-budgetlab-a40242"
+}

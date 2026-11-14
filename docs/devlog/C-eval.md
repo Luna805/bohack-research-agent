@@ -10,6 +10,19 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 11:03–11:08 · yirran + Claude Code（分支 `c/benchmark`）
+- 做了：在机器空闲时（不跑任何其他任务）重跑 Bank 开发矩阵 → `results/dev-20261114T030336Z`，代码版本为 `165a031`（非 dirty）。上一份受干扰的 `dev-20261114T024955Z` 已经移出仓库，不提交。
+- 结果（scripted，1 次重复，仅证明管道可用，不是性能结论）：
+
+  | 系统 | 交付 | holdout | 实验数 | fit | 墙钟 | 停止原因 |
+  |---|---|---|---|---|---|---|
+  | random_search | random-05 | 0.7099 | 18 | 151 | 96.7 s | experiment_limit |
+  | budgetlab_no_schedule | r02-c2 | 0.7099 | 8 | 101 | 68.8 s | no_valid_candidates |
+  | budgetlab | r02-c2 | 0.7099 | 12 | 121 | 82.3 s | no_valid_candidates |
+
+- 验证：分支 CI（`165a031`）在 Ubuntu 和 Windows 上都通过。
+- 下一步：合进 `main`，交给 D 搭页面；然后开始做 CSV 适配器。
+
 ### 2026-11-14 约 10:45–11:00 · yirran + Claude Code（分支 `c/benchmark`）
 - 做了：对照矩阵脚本 `budgetlab/benchmark.py`（`python -m budgetlab.benchmark`）。按"任务 → 重复 → 系统"串行运行，每个 run 结束后立即做一次 holdout 评测，复制三个结果文件到 `results/<matrix_id>/runs/`，每跑完一个 run 就重写 aggregate.csv/json/md；单个 slot 失败只记一行 error，不中断整个矩阵；支持 `--resume`（任务配置变了会拒绝）、`--dry-run`；`final` 矩阵要求 git 工作区干净。新增 `configs/benchmark/dev.yaml`；INTERFACES 5 增加 aggregate.md、末尾三列（slot_id、status、error）和 5.1 节矩阵配置格式。
 - 验证：`tests/test_benchmark.py` 通过（6 个 + 1 个溯源测试）；锁定环境全套 39 passed；ruff 通过。
