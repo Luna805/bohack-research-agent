@@ -29,6 +29,14 @@ from budgetlab.tasks.csv_task import (
     register_csv_task,
     validate_csv_for_task,
 )
+from budgetlab.ui.artifacts import (
+    CURVE,
+    answer_links,
+    curve_rows,
+    links_markdown,
+    resolve_artifact,
+    run_dir,
+)
 from budgetlab.ui.llm import llm_problem, llm_settings, log_call, research_config
 from budgetlab.ui.presentation import artifact_preview, event_card, load_matrix, trajectory_rows
 
@@ -193,6 +201,15 @@ def show_timeline(cards: list[dict], run_dir: Path, *, key: str) -> None:
                 st.json(card["raw"])
 
 
+def show_evidence_links(run_id: str, evidence: list[dict], answer: str) -> None:
+    """Clickable run files behind an answer: cited experiments, the score curve, final results."""
+    links = answer_links(RUNS, run_id, evidence, answer)
+    if links:
+        with st.expander(f"相关文件（{len(links)} 个，点击在新标签页打开）", expanded=True):
+            st.markdown(links_markdown(run_id, links))
+            st.caption(f"文件都在 runs/{run_id}/ 下，由程序按引用和交付记录列出。")
+
+
 def show_quick_questions(run_id: str, *, key: str) -> None:
     """Zero-token quick questions as light chips in one row; the chosen one is answered below."""
     chosen = st.pills(
@@ -207,6 +224,7 @@ def show_quick_questions(run_id: str, *, key: str) -> None:
         with st.chat_message("assistant"):
             st.write(answer["answer"])
             st.caption(f"证据：runs/{run_id}/summary.json · 0 Token")
+            show_evidence_links(run_id, answer["evidence"], answer["answer"])
 
 
 def reset_task_draft() -> None:
@@ -423,6 +441,100 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
             st.rerun()
 
 
+VIEWER_TEXT_LIMIT = 50_000
+
+
+def show_score_curve(run_id: str) -> None:
+    """Each experiment's own development score and the best score so far, from summary.json."""
+    import altair as alt
+
+    summary = STORE.get_summary(run_id)
+    rows = curve_rows(summary)
+    metric = summary.get("primary_metric") or "score"
+    st.subheader(f"得分曲线（{metric}）")
+    st.caption(
+        "开发集交叉验证分数，越高越好。圆点是每个实验自己的分数，阶梯线是截至该实验的最优分，"
+        "虚线是基线，菱形是最终交付的实验。数据来自 summary.json 的 trajectory。"
+    )
+    if not rows:
+        st.info("这次研究没有记录得分轨迹。")
+        return
+    frame = pd.DataFrame(rows)
+    x = alt.X("序号:Q", title="实验序号", axis=alt.Axis(tickMinStep=1))
+    y_scale = alt.Scale(zero=False)
+    tooltip = ["实验", "来源", "轮次", "本实验分数", "历史最优", "累计 Token"]
+    layers = [
+        alt.Chart(frame)
+        .mark_line(interpolate="step-after")
+        .encode(x=x, y=alt.Y("历史最优:Q", title=metric, scale=y_scale), tooltip=tooltip),
+        alt.Chart(frame)
+        .mark_circle(size=70)
+        .encode(
+            x=x,
+            y=alt.Y("本实验分数:Q", title=metric, scale=y_scale),
+            color=alt.Color("来源:N", title="来源"),
+            tooltip=tooltip,
+        ),
+    ]
+    if summary.get("baseline_score") is not None:
+        baseline = pd.DataFrame({"基线": [summary["baseline_score"]]})
+        layers.append(alt.Chart(baseline).mark_rule(strokeDash=[4, 4]).encode(y="基线:Q"))
+    delivered = frame[frame["实验"] == summary.get("delivered_experiment_id")]
+    if not delivered.empty:
+        layers.append(
+            alt.Chart(delivered)
+            .mark_point(shape="diamond", size=220, filled=False, strokeWidth=2)
+            .encode(x=x, y="本实验分数:Q", tooltip=tooltip)
+        )
+    st.altair_chart(alt.layer(*layers), width="stretch", alt=f"{run_id} 每个实验的分数与历史最优分")
+    st.dataframe(frame, hide_index=True)
+
+
+def show_artifact_page(run_id: str, relative: str) -> None:
+    """Read-only view of one file of one run, opened from the links under an answer."""
+    st.title("研究证据")
+    base = run_dir(RUNS, run_id)
+    if base is None:
+        st.error("找不到这次研究。")
+        return
+    st.caption(f"研究 {run_id} · 只读")
+    if relative == CURVE:
+        if (base / "summary.json").is_file():
+            show_score_curve(run_id)
+        else:
+            st.info("这次研究还没有 summary.json，暂时画不出得分曲线。")
+        return
+    path = resolve_artifact(RUNS, run_id, relative)
+    if path is None:
+        st.error("只能打开这次研究目录里已存在的文本证据文件（json、md、log、csv 等）。")
+        return
+    st.subheader(relative)
+    st.code(str(path), language=None)
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        st.info("这个文件是空的。")
+        return
+    st.download_button("下载原文件", text, file_name=path.name)
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            st.code(text[-VIEWER_TEXT_LIMIT:], language=None)
+            return
+        for line in artifact_preview(base, {"artifact": relative}):
+            st.write(line)
+        st.json(payload, expanded=2)
+    elif suffix == ".md":
+        st.markdown(text)
+    elif suffix == ".csv":
+        st.dataframe(pd.read_csv(path, nrows=5000), hide_index=True)
+    else:
+        if len(text) > VIEWER_TEXT_LIMIT:
+            st.caption(f"文件较长，只显示最后 {VIEWER_TEXT_LIMIT:,} 个字符；完整内容请下载。")
+        st.code(text[-VIEWER_TEXT_LIMIT:], language="json" if suffix == ".jsonl" else None)
+
+
 st.set_page_config(page_title="BudgetLab 研究助手", page_icon="🧪", layout="wide")
 try:
     import_module("pyarrow")
@@ -430,6 +542,10 @@ except ImportError as exc:
     st.error("页面数据表无法加载：当前 PyArrow 与项目固定的 NumPy 版本不兼容。")
     st.code(r'.\.venv\Scripts\python.exe -m pip install "pyarrow==25.0.1"')
     st.caption(f"技术信息：{exc}")
+    st.stop()
+if "file" in st.query_params:
+    # Evidence links under answers open here, in a new tab, without touching the research page.
+    show_artifact_page(st.query_params.get("run", ""), st.query_params.get("file", ""))
     st.stop()
 LLM_PROBLEM = llm_problem(ROOT)
 st.title("BudgetLab 研究助手")
@@ -850,6 +966,7 @@ def show_open_qa(run_id: str) -> None:
             refs = [f"{ref['kind']}:{ref['ref_id']}" for ref in turn.get("evidence", [])]
             cited = " · ".join(refs) if refs else "无可核对的引用"
             st.caption(f"证据：{cited} · LLM {turn['tokens']:,} Token")
+            show_evidence_links(run_id, turn.get("evidence", []), turn["answer"])
 
 
 show_active_run()
