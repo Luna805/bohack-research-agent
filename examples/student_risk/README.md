@@ -5,7 +5,7 @@
 | 文件 | 内容 |
 |---|---|
 | `student_risk.csv` | 649 名学生，34 列（33 个原始字段 + 目标列 `final_result`），其中 100 人 `fail` |
-| `card.yaml` | 标准答案：人确认后的协议（场景卡格式），可以直接传给 `register_csv_task` |
+| `card.yaml` | 标准答案：人确认后的协议（任务说明格式），可以直接传给 `register_csv_task` |
 | `build_demo_csv.py` | 从 UCI 下载原始文件、校验哈希、重新生成 CSV |
 
 来源：UCI Machine Learning Repository，[Student Performance](https://archive.ics.uci.edu/dataset/320/student+performance)（Cortez & Silva, 2008），`student-por.csv`（葡萄牙语课程），许可 CC BY 4.0。目标列 `final_result` 由期末成绩 G3 生成：G3 < 10（满分 20）为 `fail`，否则为 `pass`。CSV 里**有意保留了 G1、G2、G3**，因为学校导出的成绩表里通常就带着这些列。哪些字段不能用，正是要靠协议步骤来判断的。

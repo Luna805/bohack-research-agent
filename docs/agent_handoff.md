@@ -37,7 +37,7 @@
 
 `python -m budgetlab.cli research --config configs/llm-dev.yaml --system budgetlab --proposer llm`
 
-| run_id | 轮数 | 空轮 | invalid | 重复拦截 | 探索最优 | 确认 | LLM tokens | 墙钟 |
+| run_id | 轮数 | 空轮 | invalid | 重复拦截 | 探索最优 | 确认 | LLM tokens | 用时 |
 |---|---|---|---|---|---|---|---|---|
 | `20261114T031257Z-budgetlab-2532ff` | 3 | **2** | 0 | 0 | 0.706 | confirmed_pass | 33.7k | 465s |
 | `20261114T032702Z-budgetlab-cdfbe2` | 8（跑满） | 0 | 0 | 1 | 0.712 | confirmed_pass | 99.6k | 847s |
@@ -70,7 +70,7 @@ from budgetlab.proposers import LLMSettings
 agent = ProtocolAgent(LLMSettings.from_config(config))
 context = build_protocol_context(description, columns, profile)   # 自动剥离 availability
 outcome = agent.draft(context)              # outcome.output 是 DraftProtocol；usage 记到 ui_state
-score_draft(outcome.output, card)           # 对照场景卡算首次正确率
+score_draft(outcome.output, card)           # 对照任务说明算首次正确率
 ```
 
 `DraftProtocol` / `FieldDecision` 为可变模型（人可在确认前编辑）；`source` 由程序盖章成 `llm`，LLM 无法自报。

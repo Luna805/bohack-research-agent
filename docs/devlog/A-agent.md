@@ -8,7 +8,7 @@
 |---|---|---|
 | `budgetlab/proposers.py` | `LLMSettings` 加 `extra_body: dict \| None = None`（L337）；`from_config` 读 `llm.extra_body`（L353）；`_agent` 里 `model_settings["extra_body"] = ...`（L403–405） | `qwen3.7-plus` 是思考模型，默认把输出 token 打满，round 2/3 报 `OutputTokenLimitExceeded`。`extra_body` 让 pydantic-ai 把 `enable_thinking: false` 原样直通 OpenAI 请求体，关掉思考省 token。属于 pydantic-ai 的 `model_settings` 透传，归 A 的 LLM 层管。 |
 | `configs/llm-dev.yaml`（新） | A 的 LLM 开发配置：`proposer: llm`、正预算（`max_llm_tokens: 200000`/`max_llm_requests: 60`）、`extra_body: {enable_thinking: false}`、`max_output_tokens: 3000` | 真实 LLM 请求必须有正预算才授权（规范第 3、7 条）；关思考避免 token 膨胀，max_output_tokens 提到 3000 给关闭思考后的输出留足余量。 |
-| `budgetlab/agents/protocol_agent.py`（新） | `FieldDecision` / `DraftProtocol`（含 `source` 字段）、`build_protocol_context`、`score_draft`、`ProtocolAgent` | 任务 4：把「用户一句话 + 数据列 + 画像」转成可编辑的 `DraftProtocol`，并对照场景卡算首次正确率。复用 `proposers._PydanticAIRole` 的计量（走同一 httpx 客户端、usage 取原始响应、失败记 unknown）。 |
+| `budgetlab/agents/protocol_agent.py`（新） | `FieldDecision` / `DraftProtocol`（含 `source` 字段）、`build_protocol_context`、`score_draft`、`ProtocolAgent` | 任务 4：把「用户一句话 + 数据列 + 画像」转成可编辑的 `DraftProtocol`，并对照任务说明算首次正确率。复用 `proposers._PydanticAIRole` 的计量（走同一 httpx 客户端、usage 取原始响应、失败记 unknown）。 |
 | `budgetlab/agents/__init__.py`（新） | 只做导出 | 让 D 能 `from budgetlab.agents.protocol_agent import ...` 直接用。 |
 | `tests/test_agent_protocol.py`（新） | 3 个离线测试 | 覆盖：`build_protocol_context` 剥离 availability、`score_draft` 对照 Bank 卡纠错、`ProtocolAgent` 用 `FunctionModel` 离线计量（不联网、不依赖 Key）。 |
 | `tests/test_llm_http.py` | 加 `test_extra_body_is_forwarded_to_provider` | 确认 `extra_body` 真的进了 provider 请求体，而不是只存在配置里。 |
@@ -45,7 +45,7 @@
 
 ### 2026-11-14 约 11:55–11:06 · chier1 + Claude Code
 - 做了：A 角色开工。
-  ① 新建 `budgetlab/agents/protocol_agent.py`：`FieldDecision` / `DraftProtocol`（含 `source` 字段）、`build_protocol_context`（剥离 availability）、`score_draft`（对照场景卡算首次正确率）、`ProtocolAgent`（复用 `proposers._PydanticAIRole` 的计量与单 httpx 客户端；`source` 由程序盖成 `llm`）；`budgetlab/agents/__init__.py` 只做导出。
+  ① 新建 `budgetlab/agents/protocol_agent.py`：`FieldDecision` / `DraftProtocol`（含 `source` 字段）、`build_protocol_context`（剥离 availability）、`score_draft`（对照任务说明算首次正确率）、`ProtocolAgent`（复用 `proposers._PydanticAIRole` 的计量与单 httpx 客户端；`source` 由程序盖成 `llm`）；`budgetlab/agents/__init__.py` 只做导出。
   ② 新建 `configs/llm-dev.yaml`：`proposer: llm`，`max_llm_tokens: 200000`、`max_llm_requests: 60` 正预算，模型/Base URL/Key 一律走 `.env` 环境变量。新增 `tests/test_agent_protocol.py`（3 个离线测试）。
   ③ 填写`.env`， `LLM_MODEL`/`LLM_BASE_URL`/`LLM_API_KEY` 三个环境变量，跑真实接口门禁 `python -m budgetlab.cli probe-llm --config configs/llm-dev.yaml`（tool 模式）。
 - 验证：`probe-llm` 正常读到模型 `qwen3.7-plus` 和 MaaS Base URL，请求到达网关；返回 401 `API-key is blocked` / `invalid_api_key`（usage 记录为 unknown，符合"失败请求记 unknown"的规则）。

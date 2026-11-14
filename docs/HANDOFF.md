@@ -23,7 +23,7 @@ ruff check .
 |---|---|---|
 | W01 Schema | ✅ | 新增 `SentinelToMissing` 特征动作、HGB 的 `class_weight`、`LoopPolicy`、`CriticAdvice` |
 | W02 预算与账本 | ✅ | 新增 `Budget.can_reserve()`（只试算，不改状态）和 `remaining()` |
-| W03 数据与隔离 | ✅ | 任务适配器、场景卡、`prepare` 切出密封 holdout、开发集画像 `eda.json` |
+| W03 数据与隔离 | ✅ | 任务适配器、任务说明、`prepare` 切出密封 holdout、开发集画像 `eda.json` |
 | W04/W05 实验与裁决 | ✅ | 夜间版本基础上，随机搜索覆盖了特征动作 |
 | W06 LLM 接入 | ✅ | 真实模型 `qwen3.7-plus`（tool 模式，`extra_body` 关闭思考，单次输出上限 3000）已接通；A 在 Bank 上跑了两次真实 LLM 研究：探索最优 0.712，确认通过，每次 6.5 万–10 万 Token、约 15 分钟 |
 | W07 主循环 | ✅ | 两个候选、筛查与去重、便宜时都跑、停止规则、工具搜索调度、重规划、方向归因 |
@@ -36,7 +36,7 @@ ruff check .
 
 **开发矩阵实测（f1_macro，脚本化提案，不是 LLM，各 1 次重复，机器空闲时运行）：**
 
-| 任务 | 系统 | 基线 | holdout | 实验数 | 墙钟 |
+| 任务 | 系统 | 基线 | holdout | 实验数 | 用时 |
 |---|---|---|---|---|---|
 | Bank | random_search | 0.6412 | 0.7099 | 18 | 97 s |
 | Bank | budgetlab_no_schedule | 0.6412 | 0.7099 | 8 | 69 s |
@@ -51,7 +51,7 @@ Bank 的结果在 `results/dev-20261114T030336Z/`；Adult 那次运行的代码�
 
 ```text
 budgetlab/
-  tasks/__init__.py      任务注册表 + 下载/读取；cards/*.yaml 是场景卡（字段可用性的唯一来源）
+  tasks/__init__.py      任务注册表 + 下载/读取；cards/*.yaml 是任务说明（字段可用性的唯一来源）
   data.py                prepare（切 holdout）、load_development（只读开发集）、切分清单
   profile.py             开发集画像：类型、缺失、Top 值、分组正例率、哨兵值
   schemas.py             全部严格 Schema（extra=forbid, frozen）
@@ -103,7 +103,7 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 | 7 | 协议 Agent `DraftProtocol` | A | Yolo | ✅ 代码已合入（`budgetlab/agents/protocol_agent.py`），Bank 20/20 首次全对；已接进对话页：上传 CSV 时起草，只看开发数据（`c/pre-freeze-fixes`） | Bank 上能正确排除 `duration`；记录首次正确率和成本 |
 | 8 | 问答 Agent `budgetlab/qa/agent.py` | A | Yolo | ✅ 协调人代写 `budgetlab/qa/agent.py`，已接进对话页（`c/pre-freeze-fixes`） | 回答附证据，数字可核对，计量独立 |
 | 9 | 通用 CSV 适配器 `budgetlab/tasks/csv_task.py` | C | yirran | ✅ `0ce4c7c` | 新的二分类 CSV 能 register → prepare → 跑通 |
-| 10 | 第二个任务（改为 UCI Adult，不做 MLE-bench） | C | yirran | ✅ `c71a56f` | 场景卡 + prepare + 小矩阵能跑通 |
+| 10 | 第二个任务（改为 UCI Adult，不做 MLE-bench） | C | yirran | ✅ `c71a56f` | 任务说明 + prepare + 小矩阵能跑通 |
 | 11 | 正式矩阵准备：LLM 开跑前检查、`final.yaml` 和 `final-scripted.yaml` | C | yirran | ✅ 已按 A 的设置更新（输出上限 3000、关闭思考、每个 run 60 次请求和 30 万 Token） | `--dry-run` 能给出检查结果 |
 | 12 | 成绩表增加"对照随机搜索"和"成本效率"汇总 | C | yirran | ✅（`c/report-tables`，待推送） | 每个系统相对随机搜索的 Δholdout、ΔToken、Δ时间、胜负次数，以及每 1000 Token 带来的提升 |
 | 13 | 演示用 CSV 和协议标准答案 [`examples/student_risk/`](../examples/student_risk/README.md) | C | yirran | ✅（`c/demo-csv`，待推送） | 给 D 现场上传用，给 A 的协议 Agent 打分用 |
@@ -119,8 +119,8 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 ## 5. 已知问题与限制
 
 - **LLM 来源未确认**：项目里"主办方提供托管模型"的说法来自对群公告的转述，没有原文依据。
-- 随机分层切分偏乐观：Bank 数据按时间排序，宏观经济列随时间变化，而本版不做时间切分。这一点场景卡里已经写明，报告也要写。
-- `budget.seconds` 统计的是训练子进程时间，不是墙钟时间；墙钟时间看 `summary.wall_seconds`。
+- 随机分层切分偏乐观：Bank 数据按时间排序，宏观经济列随时间变化，而本版不做时间切分。这一点任务说明里已经写明，报告也要写。
+- `budget.seconds` 统计的是训练子进程时间，不是实际用时；实际用时看 `summary.wall_seconds`。
 - LLM 预留按"估计输入 + 最大输出 ×（重试次数 + 1）"算，比较保守；`max_output_tokens` 默认 3000，非思考模型可以降到 1500–2000。
 - 工具搜索的实验 ID（`tool-NN`）按实验总数编号，所以不连续，这是正常的。
 - 训练运行在带超时的子进程里，这不是操作系统层面的沙箱，对外不要说成"安全沙箱"。
@@ -150,7 +150,7 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 - 验证：干净检出里依次跑通 `uv sync --frozen` → `prepare` → 17 passed → ruff 通过。
 
 ### 2026-11-14 约 09:05–09:30 · yirran + Claude Code
-- 做了：Bank Marketing 适配器和场景卡、密封 holdout、数据画像、多轮主循环（三种系统）、Pydantic AI 提案器和 Critic 的计量、一次性 holdout 评测（`05c008b`）。
+- 做了：Bank Marketing 适配器和任务说明、密封 holdout、数据画像、多轮主循环（三种系统）、Pydantic AI 提案器和 Critic 的计量、一次性 holdout 评测（`05c008b`）。
 - 验证：17 passed；Bank 数据上 random_search 的 holdout 为 0.713，budgetlab（scripted）为 0.710，两者都是 confirmed_pass。
 - 问题：脚本化提案器和随机搜索打平（预期之中）；还没有真实 LLM 请求。
 - 决策：holdout 用文件隔离（`data/sealed/`）；单次实验便宜时两个候选都跑；新增 `sentinel_to_missing` 特征动作。

@@ -8,7 +8,7 @@
 | 1 | run 目录格式 | B | C、D |
 | 2 | `run_research` 与评测 API | B / C | C |
 | 3 | Proposer / Critic 协议与上下文 | A（实现）/ B（调用） | B |
-| 4 | 任务适配器与场景卡 | C | B、A |
+| 4 | 任务适配器与任务说明 | C | B、A |
 | 5 | `results/` 对照结果格式 | C | D |
 | 6 | 经验库（P1） | B | A |
 | 7 | 配置文件分段 | 各段负责人 | 全员 |
@@ -123,7 +123,9 @@ class CallOutcome:
 - B 的程序负责筛查：合法列、对照实验是否存在、规格是否重复、证据引用是否有效。A 不需要重复做这些检查，但应该在提示词里减少这类错误。
 - **上下文由 A 的 `build_context()` 生成**。它目前的键：`mode, task, legal_space, data_profile, excluded_columns, decision_rule, baseline_id, best_id, experiments, valid_evidence_refs, controller_feedback, critic_advice, progress, budget_remaining`。A 可以增删这些键，因为只有 LLM 读它们；B 只负责把 `ResearchState` 传进来。上下文里不能出现 holdout 的任何信息。
 
-## 4. 任务适配器与场景卡（C 提供）
+## 4. 任务适配器与任务说明（C 提供）
+
+**任务说明**（代码里叫 card，文件在 `budgetlab/tasks/cards/`）：每个任务一份，写明预测什么、在什么时候预测、用什么指标，以及每个字段在预测时能不能用。程序在训练前按它冻结可用字段，LLM 改不了。
 
 ```python
 # budgetlab/tasks/__init__.py
@@ -138,7 +140,7 @@ prepare_task(task_id, data_root, *, force=False) -> manifest dict   # 写 prepar
 load_development(task_id, data_root) -> DatasetBundle                # 只读开发集
 ```
 
-场景卡 `budgetlab/tasks/cards/<task_id>.yaml` 的必填字段：
+任务说明 `budgetlab/tasks/cards/<task_id>.yaml` 的必填字段：
 
 ```yaml
 task_id: ...
@@ -273,10 +275,10 @@ class DraftProtocol(BaseModel):
 ```
 
 - 输入：一句话描述、列名、开发数据画像（`profile_development` 的输出，**不带可用性标注**）。不能把 holdout 传给它。
-- 打分用的标准答案：`examples/student_risk/card.yaml`（学生不及格预警，必须排除 G1、G2、G3，`absences` 是边界情况），以及内置任务的场景卡（Bank 必须排除 `duration`）。打分规则见 `examples/student_risk/README.md`。
+- 打分用的标准答案：`examples/student_risk/card.yaml`（学生不及格预警，必须排除 G1、G2、G3，`absences` 是边界情况），以及内置任务的任务说明（Bank 必须排除 `duration`）。打分规则见 `examples/student_risk/README.md`。
 - 调用协议 Agent 时也要计量 Token，记录到 `ui_state/llm_calls.jsonl`，和研究预算分开。
-- 人确认（可以先修改）后，D 把最终结果转换成场景卡 dict（格式见第 4 节），交给 C 的 `register_csv_task`。草稿和最终版都保存在 `data/uploads/<task_id>/` 下：`draft_protocol.json`、`card.yaml`。
-- **兜底路径（没有 LLM）**：示例任务的 `DraftProtocol` 由 D 直接从已有场景卡转换而来，`questions_for_user` 为空，并标注 `source=card`；新上传的 CSV 生成一份所有字段都待人确认的空白草稿，标注 `source=manual`。正常由 Agent 生成的草稿标注 `source=llm`。因此 `DraftProtocol` 需要增加字段 `source: Literal["llm", "card", "manual"]`。
+- 人确认（可以先修改）后，D 把最终结果转换成任务说明 dict（格式见第 4 节），交给 C 的 `register_csv_task`。草稿和最终版都保存在 `data/uploads/<task_id>/` 下：`draft_protocol.json`、`card.yaml`。
+- **兜底路径（没有 LLM）**：示例任务的 `DraftProtocol` 由 D 直接从已有任务说明转换而来，`questions_for_user` 为空，并标注 `source=card`；新上传的 CSV 生成一份所有字段都待人确认的空白草稿，标注 `source=manual`。正常由 Agent 生成的草稿标注 `source=llm`。因此 `DraftProtocol` 需要增加字段 `source: Literal["llm", "card", "manual"]`。
 
 ### 8.2 通用 CSV 任务（C 提供，D 调用）
 
@@ -299,7 +301,7 @@ config = config_for_upload(task_id, yaml.safe_load(open("configs/bank_marketing.
 # 把 config 写到 ui_state/configs/<task_id>.yaml，再用子进程跑 research（8.3）
 ```
 
-- `card` 的格式同第 4 节的场景卡，另外可以带 `primary_metric`（默认 `f1_macro`）。`task_id` 由 C 生成，不需要传入。`fields` 必须覆盖除目标列以外的每一列。
+- `card` 的格式同第 4 节的任务说明，另外可以带 `primary_metric`（默认 `f1_macro`）。`task_id` 由 C 生成，不需要传入。`fields` 必须覆盖除目标列以外的每一列。
 - 同一份 CSV 加同一份确认后的协议，得到的 `task_id` 相同（可以重复注册）；协议有任何改动，就会得到新的 `task_id`。
 - 注册结果落盘在 `<data_root>/uploads/<task_id>/`：`data.csv`（统一转为 UTF-8、逗号分隔）、`card.yaml`、`task.json`。`get_task(task_id)` 通过 `register_data_root` 登记过的数据根目录查找上传任务（`prepare_task` 和 `load_development` 会自动登记），找不到时再依次查 `<项目>/data` 和 `<当前目录>/data`，所以训练子进程也能找到。`data/uploads/` 不进 git。
 - 拒绝条件（理由用中文，可以直接展示）：读不了文件；目标列不存在、有缺失值、或不是正好两个取值；少数类少于 10 行；超过 10 万行或 200 列；协议缺少必填字段；正类不是目标列的取值之一；有列没写明能否使用、或可用性的值不合法；确认后没有可用特征；某个可用的类别列不同取值超过 1000 个（高基数类别或文本列暂不支持，请标成 `identifier`）。

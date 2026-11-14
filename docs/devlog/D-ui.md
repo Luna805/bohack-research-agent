@@ -55,7 +55,7 @@
 
 ### 2026-11-14 · D 页面初版
 
-- 新增 Streamlit 对话式研究页：场景卡确认、示例数据准备、脚本化研究启动、事件步骤卡、结果、一次性 holdout 按钮和 0 Token 快捷问答。
+- 新增 Streamlit 对话式研究页：任务说明确认、示例数据准备、脚本化研究启动、事件步骤卡、结果、一次性 holdout 按钮和 0 Token 快捷问答。
 - 新增只读证据访问层和快捷问题；读取 `runs/` 产物，不读取 sealed 数据。
 - 验证：在本仓库 `.venv` 安装 `.[dev,llm,ui]` 后，`pytest -q` 为 35 passed，`ruff check .` 和 `ruff format --check budgetlab tests` 均通过；Streamlit 服务能正常启动。浏览器内完整研究流程仍待人工验收。
 - 下一步：接入 A 的协议/问答 Agent 与 C 的通用 CSV 适配器；在干净环境运行全量 pytest 和页面演示。

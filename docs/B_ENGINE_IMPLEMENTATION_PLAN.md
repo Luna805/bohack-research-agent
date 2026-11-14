@@ -46,7 +46,7 @@ b/memory             # P1
 
 - `run_research()` 支持 `random_search`、`budgetlab_no_schedule`、`budgetlab`。
 - 研究阶段只使用 development 数据，holdout 由独立评测读取。
-- 场景卡控制字段可用性。
+- 任务说明控制字段可用性。
 - 基线、噪声标定、`min_effect` 和契约冻结已实现。
 - Proposer 每轮返回两个候选，程序负责筛查、训练和裁决。
 - 实验在独立子进程中运行，支持超时和日志。
@@ -271,7 +271,7 @@ budgetlab/memory/
 | `models.py` | Lesson 和 Snapshot 的严格模型 |
 | `store.py` | 原子读写、规范化和快照哈希 |
 | `extract.py` | 从完成 run 提取经验草稿 |
-| `match.py` | 根据 profile 和场景卡匹配最多 3 条经验 |
+| `match.py` | 根据 profile 和任务说明匹配最多 3 条经验 |
 | `__init__.py` | 导出稳定 API |
 
 经验库内部模型不要放进共享 `schemas.py`，除非已确认需要跨角色共享。
@@ -362,7 +362,7 @@ runs/<run_id>/memory_draft.json
 
 ## P1-5 匹配条件和 API
 
-从开发集 profile 和场景卡提取稳定条件：数据量区间、正类比例、类别不平衡、字段类型数量、sentinel、高缺失、primary metric、可用模型族。
+从开发集 profile 和任务说明提取稳定条件：数据量区间、正类比例、类别不平衡、字段类型数量、sentinel、高缺失、primary metric、可用模型族。
 
 不得包含 holdout、密封数据统计、密钥或无证据业务推断。
 
