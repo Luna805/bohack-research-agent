@@ -29,7 +29,12 @@ from budgetlab.tasks.csv_task import (
 )
 from budgetlab.ui.insights import cycle_status
 from budgetlab.ui.presentation import artifact_preview, event_card, load_matrix, trajectory_rows
-from budgetlab.ui.workspace import render_branch_map, render_result_panel, render_token_panel
+from budgetlab.ui.workspace import (
+    render_branch_map,
+    render_evidence_files,
+    render_result_panel,
+    render_token_panel,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
@@ -197,6 +202,7 @@ def show_side_results(selected_run_dir: Path | None, history_selected: bool) -> 
     run_dir = selected_run_dir
     if not history_selected and (job := st.session_state.get("job")):
         run_dir = locate_run(job) or run_dir
+    render_evidence_files(run_dir)
     render_result_panel(run_dir)
 
 
@@ -363,43 +369,44 @@ except ImportError as exc:
     st.caption(f"技术信息：{exc}")
     st.stop()
 st.html("""<style>
-body::before {
+.stApp {background:#0B1018;}
+.stApp::before {
   content:"";position:fixed;inset:-30%;pointer-events:none;z-index:0;
-  background:radial-gradient(ellipse at 24% 35%,#b8ff6524,transparent 42%),
-             radial-gradient(ellipse at 76% 65%,#b8ff6515,transparent 42%);
+  background:radial-gradient(ellipse at 24% 35%,rgba(184,255,101,.14),transparent 42%),
+             radial-gradient(ellipse at 76% 65%,rgba(184,255,101,.08),transparent 42%);
   animation:aurora 26s ease-in-out infinite alternate;
 }
 @keyframes aurora {from {transform:translate(-4%,2%) rotate(-6deg)}
   to {transform:translate(5%,-3%) rotate(7deg)}}
-@media (prefers-reduced-motion:reduce) {body::before {animation:none}}
+@media (prefers-reduced-motion:reduce) {.stApp::before {animation:none}}
 .st-key-brand_header {
-  background:linear-gradient(110deg,#192436,#101823 68%);
-  border:1px solid #304052;border-radius:18px;
+  background:rgba(11,16,24,.88);
+  border:1px solid rgba(244,247,251,.22);border-radius:18px;
   padding:.75rem 1.4rem;margin-bottom:.7rem;
   position:sticky;top:.25rem;z-index:20;
-  box-shadow:0 12px 36px #0005;
+  box-shadow:0 12px 36px rgba(11,16,24,.5);
 }
 .st-key-brand_header h3 {letter-spacing:-.04em;font-weight:800;margin:0;}
 .st-key-left_rail,.st-key-center_rail,.st-key-right_rail {
   height:calc(100vh - 10.5rem);overflow-y:auto;
-  padding:1.3rem;border:1px solid #263446;
+  padding:1.3rem;border:1px solid rgba(244,247,251,.16);
   border-radius:16px;
-  scrollbar-color:#40556a transparent;
+  scrollbar-color:rgba(244,247,251,.3) transparent;
 }
-.st-key-left_rail,.st-key-right_rail {background:#111925;}
-.st-key-center_rail {background:#151f2c;}
-.st-key-left_rail h4,.st-key-right_rail h4 {color:#b8ff65;letter-spacing:.04em;}
+.st-key-left_rail,.st-key-right_rail {background:rgba(11,16,24,.88);}
+.st-key-center_rail {background:rgba(11,16,24,.72);}
+.st-key-left_rail h4,.st-key-right_rail h4 {color:#B8FF65;letter-spacing:.04em;}
 .st-key-token_meter {
-  background:linear-gradient(135deg,#243a30,#17271f);
-  padding:1rem 1.1rem;border:1px solid #4a7250;
+  background:rgba(184,255,101,.09);
+  padding:1rem 1.1rem;border:1px solid rgba(184,255,101,.38);
   border-radius:14px;margin-top:1rem;
 }
-.st-key-token_meter h2 {color:#b8ff65;letter-spacing:-.06em;}
+.st-key-token_meter h2 {color:#B8FF65;letter-spacing:-.06em;}
 .st-key-research_prompt {
   position:fixed;bottom:.7rem;left:25%;width:44%;z-index:30;
-  background:#192536;border:1px solid #3b5267;
+  background:#0B1018;border:1px solid rgba(184,255,101,.55);
   border-radius:16px;padding:.45rem .7rem;
-  box-shadow:0 18px 44px #0009;
+  box-shadow:0 18px 44px rgba(11,16,24,.7);
 }
 @media (max-width:900px) {
   .st-key-left_rail,.st-key-center_rail,.st-key-right_rail {
@@ -467,22 +474,6 @@ with left_col:
 
 with right_col:
     with st.container(key="right_rail"):
-        st.markdown("#### 证据文件")
-        if selected_run_dir and selected_run_dir.is_dir():
-            for name in (
-                "contract.json",
-                "events.jsonl",
-                "budget.json",
-                "summary.json",
-                "final_evaluation.json",
-                "report.md",
-            ):
-                file_path = selected_run_dir / name
-                if file_path.is_file():
-                    with st.expander(f"↗ {name}"):
-                        st.code(str(file_path.relative_to(ROOT)))
-        else:
-            st.write("开始研究后在这里查看证据。")
         show_side_results(selected_run_dir, history_id != "开始新研究")
 
 with center_col:
@@ -551,43 +542,47 @@ with center_col:
             st.stop()
         if history_id != "开始新研究":
             history_dir = RUNS / history_id
-            st.subheader("已有研究")
-            st.caption(f"{history_id} · 数据来自本机 runs/，不属于正式成绩")
-            show_saved_run_map(history_dir)
+            with st.chat_message("user"):
+                st.write(f"查看研究 `{history_id}` 的结论和证据")
+            with st.chat_message("assistant"):
+                show_saved_run_map(history_dir)
             if (history_dir / "summary.json").is_file():
                 history_summary = STORE.get_summary(history_id)
-                st.markdown("### 研究结论")
-                with st.container(horizontal=True):
-                    baseline = history_summary.get("baseline_score")
-                    delivered = history_summary.get("delivered_dev_score")
-                    st.metric(
-                        "基线", f"{baseline:.3f}" if baseline is not None else "—", border=True
-                    )
-                    st.metric(
-                        "交付模型",
-                        f"{delivered:.3f}" if delivered is not None else "—",
-                        border=True,
-                    )
-                    st.metric(
-                        "确认状态", history_summary.get("confirmation_status", "未知"), border=True
-                    )
-                evaluation = STORE.get_final_evaluation(history_id)
-                if evaluation:
-                    st.write(f"Holdout：{evaluation.get('holdout_score')}（已评测）")
-                elif st.button("运行一次 holdout 评测", key=f"history-evaluate-{history_id}"):
-                    if error := evaluate_run(history_id):
-                        st.error(error)
-                    else:
-                        st.rerun()
-                for question_id, question in QUICK_QUESTIONS.items():
-                    if st.button(question, key=f"history-faq-{history_id}-{question_id}"):
-                        st.session_state["history_faq"] = (
-                            history_id,
-                            answer_quick(question_id, history_id, STORE),
+                with st.chat_message("assistant"):
+                    st.markdown("### 研究结论")
+                    with st.container(horizontal=True):
+                        baseline = history_summary.get("baseline_score")
+                        delivered = history_summary.get("delivered_dev_score")
+                        st.metric(
+                            "基线", f"{baseline:.3f}" if baseline is not None else "—", border=True
                         )
+                        st.metric(
+                            "交付模型",
+                            f"{delivered:.3f}" if delivered is not None else "—",
+                            border=True,
+                        )
+                        st.metric(
+                            "确认状态",
+                            history_summary.get("confirmation_status", "未知"),
+                            border=True,
+                        )
+                    evaluation = STORE.get_final_evaluation(history_id)
+                    if evaluation:
+                        st.write(f"Holdout：{evaluation.get('holdout_score')}（已评测）")
+                    elif st.button("运行一次 holdout 评测", key=f"history-evaluate-{history_id}"):
+                        if error := evaluate_run(history_id):
+                            st.error(error)
+                        else:
+                            st.rerun()
+                    for question_id, question in QUICK_QUESTIONS.items():
+                        if st.button(question, key=f"history-faq-{history_id}-{question_id}"):
+                            st.session_state["history_faq"] = (
+                                history_id,
+                                answer_quick(question_id, history_id, STORE),
+                            )
                 if (saved := st.session_state.get("history_faq")) and saved[0] == history_id:
-                    st.write(saved[1]["answer"])
-                    st.caption(f"证据：runs/{history_id}/summary.json · 0 Token")
+                    with st.chat_message("assistant"):
+                        st.write(saved[1]["answer"])
             else:
                 st.info("这次研究还没有最终汇总，可能正在运行，也可能已中断。步骤仍可查看。")
             with st.container(key="research_prompt"):
@@ -733,8 +728,9 @@ with center_col:
                 return
 
             events = read_events(run_dir)
-            st.caption(f"研究编号：{run_dir.name} · 已记录 {len(events)} 条事件")
-            render_branch_map(run_dir)
+            with st.chat_message("assistant"):
+                st.write(f"已记录 {len(events)} 条研究事件，当前实验路径如下。")
+                render_branch_map(run_dir)
             if not (run_dir / "summary.json").is_file():
                 if job["process"].poll() is None:
                     st.info("研究仍在进行；分岔图与侧栏进度每 2 秒自动更新。")
@@ -756,7 +752,6 @@ with center_col:
                     f"确认状态：{summary.get('confirmation_status')}；"
                     f"代码版本：{summary.get('code_version')}"
                 )
-                st.caption("数值来自本次 run 的 summary.json；当前未使用 LLM。")
                 evaluation = STORE.get_final_evaluation(run_dir.name)
                 if evaluation:
                     st.write(f"Holdout：{evaluation.get('holdout_score')}（已评测）")

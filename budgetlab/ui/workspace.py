@@ -47,6 +47,39 @@ def render_token_panel(run_dir: Path | None) -> None:
             st.dataframe(ledger["by_round"], hide_index=True, alt="每轮提案和审查的 Token 使用记录")
 
 
+def render_evidence_files(run_dir: Path | None) -> None:
+    """Preview only allowlisted run artifacts, never sealed data or model files."""
+    st.markdown("#### 证据文件")
+    if run_dir is None or not run_dir.is_dir():
+        st.write("开始研究后在这里查看证据。")
+        return
+    names = (
+        "protocol.json",
+        "contract.json",
+        "eda.json",
+        "events.jsonl",
+        "budget.json",
+        "summary.json",
+        "final_evaluation.json",
+        "report.md",
+    )
+    paths = [run_dir / name for name in names if (run_dir / name).is_file()]
+    experiments = run_dir / "experiments"
+    if experiments.is_dir():
+        paths.extend(sorted(experiments.glob("*.json"))[-5:])
+    if not paths:
+        st.write("正在生成证据文件…")
+        return
+    st.caption(f"{len(paths)} 个可查看文件")
+    for path in paths:
+        label = str(path.relative_to(run_dir)).replace("\\", "/")
+        with st.expander(f"↗ {label}"):
+            content = path.read_text(encoding="utf-8", errors="replace")
+            st.code(content[:4000], language="json" if path.suffix in {".json", ".jsonl"} else None)
+            if len(content) > 4000:
+                st.caption("预览前 4,000 字符")
+
+
 def render_result_panel(run_dir: Path | None) -> None:
     st.markdown("#### 验证结果")
     if run_dir is None:
@@ -90,7 +123,9 @@ def render_result_panel(run_dir: Path | None) -> None:
 
 def render_branch_map(run_dir: Path | None) -> None:
     st.subheader("研究路径")
-    st.caption("悬停看结果 · 选择节点看依据")
+    with st.popover("图例与操作"):
+        st.write("荧光绿：最终交付；亮色：达到门槛；淡色：其他尝试。")
+        st.write("悬停节点看结果，下方选择实验可看完整依据。")
     if run_dir is None:
         st.info("选择左侧研究记录，或启动一次研究后查看分岔。")
         return
@@ -105,7 +140,6 @@ def render_branch_map(run_dir: Path | None) -> None:
         height=540,
         alt="研究实验分岔，荧光绿节点为交付方案，蓝色节点为通过门槛的方案",
     )
-    st.caption("● 交付方案  ·  ● 达到门槛  ·  ● 其他尝试")
     chosen = st.selectbox(
         "查看节点说明",
         [row["id"] for row in rows],
@@ -115,4 +149,5 @@ def render_branch_map(run_dir: Path | None) -> None:
     row = next(row for row in rows if row["id"] == chosen)
     st.info(explain_experiment(row, summary.get("delivered_experiment_id")))
     if row.get("hypothesis"):
-        st.caption(f"原始假设：{row['hypothesis']}")
+        with st.expander("查看原始假设"):
+            st.write(row["hypothesis"])
