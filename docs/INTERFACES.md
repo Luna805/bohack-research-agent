@@ -20,18 +20,18 @@
 
 路径：`runs/<run_id>/`，其中 `run_id = <UTC时间>-<system>-<6位随机>`。run 目录一旦写完就不再修改，`final_evaluation.json` 除外（由评测写入，且只写一次）。
 
-| 文件 | 内容 | 主要读者 |
-|---|---|---|
-| `summary.json` | 一次 run 的全部汇总，**界面和表格都从这里取数** | C、D |
-| `final_evaluation.json` | holdout 一次性评测结果 | C、D |
-| `report.md` | 人读报告（D 负责模板） | 评委 |
-| `events.jsonl` | 单写者事件流，`seq` 连续 | D（轨迹回放） |
-| `experiments/<id>.json` | 单个实验的规格、结果和全部裁决 | D（证据链） |
-| `rounds/round-NN.json` | 每轮的提案，选中、拒绝、未运行及原因，触发来源 | D（轨迹） |
-| `llm_calls.jsonl` | 每次 LLM 调用的预留、用量、未知项、上下文和输出引用 | C、D |
-| `llm/<role>-rNN.{context,output}.json` | 原样保存的上下文和输出 | D（证据链） |
-| `run_config.json` | 配置、系统、提案来源、data_root、**git 版本、环境** | C |
-| `contract.json`、`protocol.json`、`calibration.json`、`confirmation.json`、`confirmation/split-<seed>.json`、`eda.json`、`budget.json`、`scenario_card.json`、`split_manifest.json`、`delivery/` | 契约与证据 | 审计 |
+| 文件                                                                                                                                                                                      | 内容                                 | 主要读者    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------- |
+| `summary.json`                                                                                                                                                                          | 一次 run 的全部汇总，**界面和表格都从这里取数**       | C、D     |
+| `final_evaluation.json`                                                                                                                                                                 | holdout 一次性评测结果                    | C、D     |
+| `report.md`                                                                                                                                                                             | 人读报告（D 负责模板）                       | 评委      |
+| `events.jsonl`                                                                                                                                                                          | 单写者事件流，`seq` 连续                    | D（轨迹回放） |
+| `experiments/<id>.json`                                                                                                                                                                 | 单个实验的规格、结果和全部裁决                    | D（证据链）  |
+| `rounds/round-NN.json`                                                                                                                                                                  | 每轮的提案，选中、拒绝、未运行及原因，触发来源            | D（轨迹）   |
+| `llm_calls.jsonl`                                                                                                                                                                       | 每次 LLM 调用的预留、用量、未知项、上下文和输出引用       | C、D     |
+| `llm/<role>-rNN.{context,output}.json`                                                                                                                                                  | 原样保存的上下文和输出                        | D（证据链）  |
+| `run_config.json`                                                                                                                                                                       | 配置、系统、提案来源、data_root、**git 版本、环境** | C       |
+| `contract.json`、`protocol.json`、`calibration.json`、`confirmation.json`、`confirmation/split-<seed>.json`、`eda.json`、`budget.json`、`scenario_card.json`、`split_manifest.json`、`delivery/` | 契约与证据                              | 审计      |
 
 ### 1.1 `summary.json`（`summary_version: 1`）
 
