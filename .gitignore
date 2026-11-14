@@ -211,6 +211,12 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# BudgetLab runtime artifacts
+runs/*
+!runs/.gitkeep
+docs/night-run/logs/*
+!docs/night-run/logs/.gitkeep
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
