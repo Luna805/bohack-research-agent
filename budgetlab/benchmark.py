@@ -18,9 +18,9 @@ Rules baked in:
 * ``aggregate.csv`` / ``aggregate.json`` / ``aggregate.md`` are rewritten after every run,
   so an interrupted matrix keeps everything finished so far and can be resumed;
 * a ``final`` matrix refuses to start from a checkout with uncommitted changes;
-* a matrix with ``proposer: llm`` is checked before anything runs (positive LLM budget in
-  every task config, model and key configured), so a misconfigured night run fails in
-  seconds instead of recording a column of failed slots.
+* proposals always come from the LLM (``proposer: llm``), so every matrix is checked before
+  anything runs (positive LLM budget in every task config, model and key configured) and a
+  misconfigured night run fails in seconds instead of recording a column of failed slots.
 """
 
 from __future__ import annotations
@@ -119,9 +119,9 @@ def load_matrix(path: Path) -> dict[str, Any]:
     repeats = int(matrix.get("repeats", 1))
     if repeats < 1:
         raise MatrixError("repeats must be >= 1")
-    proposer = matrix.get("proposer", "scripted")
-    if proposer not in ("scripted", "llm"):
-        raise MatrixError("proposer must be scripted or llm")
+    proposer = matrix.get("proposer", "llm")
+    if proposer != "llm":
+        raise MatrixError(f"proposer must be llm, got {proposer!r} (no rule-based proposer)")
     return {
         "kind": kind,
         "description": matrix.get("description", ""),

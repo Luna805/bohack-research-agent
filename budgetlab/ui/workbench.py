@@ -138,6 +138,41 @@ def history_rows(runs_root: Path, runs: list[dict[str, Any]]) -> list[dict[str, 
     )
 
 
+def project_groups(rows: list[dict[str, Any]], projects: dict[str, str]) -> list[dict[str, Any]]:
+    """History rows grouped under their task, the project with the newest run first.
+
+    ``projects`` maps known task ids to display names. Known projects are listed even
+    without runs, after the ones that have runs, in the order given. ``rows`` must be
+    newest first, as :func:`history_rows` returns them.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        task_id = row.get("task_id") or "unknown"
+        name = projects.get(task_id) or row.get("title") or task_id
+        groups.setdefault(task_id, {"task_id": task_id, "name": name, "runs": []})
+        groups[task_id]["runs"].append(row)
+    for task_id, name in projects.items():
+        groups.setdefault(task_id, {"task_id": task_id, "name": name, "runs": []})
+    oldest = datetime.min.replace(tzinfo=UTC)
+    return sorted(
+        groups.values(),
+        key=lambda group: max((row["started"] or oldest for row in group["runs"]), default=oldest),
+        reverse=True,
+    )
+
+
+def when_text(started: datetime | None, now: datetime) -> str:
+    """Local start time for a history row: ``19:28`` today, ``昨天`` or ``11月13日`` before."""
+    if started is None:
+        return ""
+    local, today = started.astimezone(), now.astimezone().date()
+    if local.date() == today:
+        return local.strftime("%H:%M")
+    if (today - local.date()).days == 1:
+        return "昨天"
+    return f"{local.month}月{local.day}日"
+
+
 # ------------------------------------------------------------------------------ experiments
 
 

@@ -18,7 +18,7 @@ Without uv: `pip install -r requirements.lock pytest ruff "pydantic-ai-slim[open
 ```bash
 python -m budgetlab.cli prepare --task bank_marketing          # download UCI data, seal 20% holdout
 python -m budgetlab.cli research --config configs/bank_marketing.yaml --system random_search
-python -m budgetlab.cli research --config configs/bank_marketing.yaml --system budgetlab --proposer scripted
+python -m budgetlab.cli research --config configs/llm-dev.yaml --system budgetlab   # LLM proposals, needs .env
 python -m budgetlab.cli evaluate --run-id <RUN_ID>             # once per run, after freezing
 python -m budgetlab.cli reproduce --run-id <RUN_ID>
 python -m budgetlab.cli replay --run-id <RUN_ID>
@@ -67,15 +67,15 @@ contexts and outputs), `rounds/round-NN.json` (proposal, rejected / selected / n
 reasons, trigger source), `experiments/<id>.json` (spec, result, all verdicts, logs),
 `confirmation.json`, `delivery/`, `summary.json`, `report.md`, `final_evaluation.json`.
 
-## Chat research page (offline demonstration)
+## Chat research page
 
 Install the optional UI dependencies with `uv sync --frozen --extra dev --extra llm --extra ui`,
-then run `uv run streamlit run budgetlab/ui/app.py`. Choose Bank Marketing, Adult Income,
-or the offline Breast Cancer smoke task, confirm its protocol card, prepare the data,
-and start research. Bank and Adult preparation download public data on first use.
+then run `uv run streamlit run budgetlab/ui/app.py`. Choose Bank Marketing or Adult Income,
+confirm its protocol card, prepare the data, and start research. Bank and Adult preparation
+download public data on first use. Experiment proposals always come from the LLM configured in
+`.env`; without it the page can only browse earlier runs.
 You can also attach a binary-classification CSV in the chat, select its target and positive
-class, and confirm each field's availability before preparing a local task. The page labels
-scripted proposals as **not using an LLM**. Every score
+class, and confirm each field's availability before preparing a local task. Every score
 is read from the run artifacts. Holdout scoring requires a separate button and can run once.
 The page is a workbench: the conversation is on the left and the run's workspace on the right.
 For a quick demonstration, click one of the example cards; **新研究** clears the page state

@@ -1,6 +1,7 @@
 """Workbench data: confined file listing, experiment status, progress and history."""
 
 import json
+from datetime import UTC, datetime
 
 from budgetlab.ui.workbench import (
     describe_spec,
@@ -8,8 +9,10 @@ from budgetlab.ui.workbench import (
     history_rows,
     list_entries,
     progress,
+    project_groups,
     round_started_at,
     sort_entries,
+    when_text,
 )
 
 RUN_ID = "20261114T091425Z-budgetlab-abc123"
@@ -120,3 +123,30 @@ def test_round_start_history_and_spec_text(tmp_path):
         }
     )
     assert text == "随机森林 · 300 棵 · 平衡权重；log1p campaign、previous"
+
+
+def test_project_groups_nest_runs_under_their_task():
+    def row(run_id, task_id, hour):
+        started = datetime(2026, 11, 14, hour, tzinfo=UTC)
+        return {
+            "run_id": run_id,
+            "task_id": task_id,
+            "title": f"card {task_id}",
+            "started": started,
+        }
+
+    rows = [
+        row("c", "breast_cancer", 11),
+        row("b", "bank_marketing", 10),
+        row("a", "bank_marketing", 9),
+    ]
+    groups = project_groups(rows, {"bank_marketing": "Bank Marketing", "adult": "Adult Income"})
+    assert [g["task_id"] for g in groups] == ["breast_cancer", "bank_marketing", "adult"]
+    assert groups[0]["name"] == "card breast_cancer"  # unknown task falls back to the card title
+    assert [r["run_id"] for r in groups[1]["runs"]] == ["b", "a"]
+    assert groups[2]["runs"] == []  # known projects show up even without runs
+
+    now = datetime(2026, 11, 14, 12, tzinfo=UTC)
+    assert when_text(None, now) == ""
+    assert ":" in when_text(datetime(2026, 11, 14, 11, 30, tzinfo=UTC), now)
+    assert when_text(datetime(2026, 11, 1, 12, tzinfo=UTC), now) == "11月1日"

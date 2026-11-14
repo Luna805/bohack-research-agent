@@ -1,11 +1,10 @@
 """Proposers (and the on-demand critic) behind one small interface.
 
-* ``ScriptedProposer`` - deterministic, zero-token rules that react to program results.
-  It exists to test the controller offline and is always labelled ``scripted``.
 * ``PydanticAIProposer`` / ``PydanticAICritic`` - one hosted LLM through PydanticAI with a
   strict output schema. Usage is reported back so the controller can settle the budget.
+  This is the only proposer: every BudgetLab experiment proposal comes from the LLM.
 
-Neither kind can compute metrics, change verdicts or touch the holdout: they only see the
+Neither can compute metrics, change verdicts or touch the holdout: they only see the
 compact context built by ``build_context`` from development-side facts.
 """
 
@@ -19,20 +18,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from .contracts import spec_hash
 from .schemas import (
-    AddMissingIndicators,
-    Candidate,
     CriticAdvice,
-    ExperimentSpec,
-    ForestSpec,
-    HistBoostSpec,
-    Hypothesis,
-    LogisticSpec,
-    PreprocessingSpec,
     ProposalBatch,
     ResourceVector,
-    SentinelToMissing,
     TaskContract,
 )
 from .state import ResearchState
@@ -185,128 +174,6 @@ class Critic(Protocol):
     def estimate(self, context: dict[str, Any]) -> ResourceVector: ...
 
     def review(self, context: dict[str, Any]) -> CallOutcome: ...
-
-
-# ------------------------------------------------------------------------------ scripted
-
-
-class ScriptedProposer:
-    """Deterministic zero-token rules: weight classes, switch family, fix sentinels, tune."""
-
-    source = "scripted"
-
-    def estimate(self, context: dict[str, Any]) -> ResourceVector:
-        return ResourceVector()
-
-    def _moves(self, best: ExperimentSpec, context: dict[str, Any]) -> list[tuple[str, Any]]:
-        moves: list[tuple[str, ExperimentSpec]] = []
-        model = best.model
-        if getattr(model, "class_weight", None) is None:
-            moves.append(
-                (
-                    "Balanced class weights should raise minority-class F1 on an imbalanced task.",
-                    best.model_copy(
-                        update={"model": model.model_copy(update={"class_weight": "balanced"})}
-                    ),
-                )
-            )
-        families = context["legal_space"]["model_families"]
-        for family in families:
-            if family == model.family:
-                continue
-            new_model: Any
-            if family == "logistic_regression":
-                new_model = LogisticSpec(family=family, class_weight="balanced", max_iter=500)
-                prep = PreprocessingSpec(numeric_scaler="standard")
-            elif family == "random_forest":
-                new_model = ForestSpec(family=family, class_weight="balanced", min_samples_leaf=5)
-                prep = PreprocessingSpec()
-            else:
-                new_model = HistBoostSpec(family=family, class_weight="balanced")
-                prep = PreprocessingSpec()
-            moves.append(
-                (
-                    f"A {family} model may capture structure the current best misses.",
-                    ExperimentSpec(
-                        model=new_model, preprocessing=prep, feature_actions=best.feature_actions
-                    ),
-                )
-            )
-        for column in context["data_profile"]:
-            if "possible_sentinel" in column and not best.feature_actions:
-                actions = (
-                    SentinelToMissing(
-                        kind="sentinel_to_missing",
-                        columns=(column["name"],),
-                        value=column["possible_sentinel"],
-                    ),
-                    AddMissingIndicators(kind="missing_indicator", columns=(column["name"],)),
-                )
-                moves.append(
-                    (
-                        f"{column['name']} uses {column['possible_sentinel']} as a placeholder; "
-                        "an explicit flag may help.",
-                        best.model_copy(update={"feature_actions": actions}),
-                    )
-                )
-        tweaks: dict[str, list[dict[str, Any]]] = {
-            "random_forest": [
-                {"min_samples_leaf": 10},
-                {"min_samples_leaf": 2},
-                {"n_estimators": 200},
-            ],
-            "hist_gradient_boosting": [
-                {"learning_rate": 0.05, "max_iter": 200},
-                {"min_samples_leaf": 50},
-            ],
-            "logistic_regression": [{"c": 0.2}, {"c": 5.0}],
-        }
-        for update in tweaks[model.family]:
-            moves.append(
-                (
-                    f"Tuning {', '.join(update)} may trade bias and variance better.",
-                    best.model_copy(update={"model": model.model_copy(update=update)}),
-                )
-            )
-        return moves
-
-    def propose(self, context: dict[str, Any]) -> CallOutcome:
-        rows = {row["id"]: row for row in context["experiments"]}
-        best_id = context["best_id"]
-        best = ExperimentSpec.model_validate(rows[best_id]["spec"])
-        seen = {spec_hash(ExperimentSpec.model_validate(row["spec"])) for row in rows.values()}
-        chosen: list[tuple[str, ExperimentSpec]] = []
-        for statement, spec in self._moves(best, context):
-            digest = spec_hash(spec)
-            if digest in seen:
-                continue
-            seen.add(digest)
-            chosen.append((statement, spec))
-            if len(chosen) == 2:
-                break
-        if len(chosen) < 2:
-            return CallOutcome(output=None, error="scripted proposer has no untried moves left")
-        candidates = tuple(
-            Candidate(
-                candidate_id=f"s{index + 1}",
-                hypothesis=Hypothesis(
-                    statement=statement,
-                    evidence_refs=(best_id, "eda"),
-                    comparator_experiment_id=best_id,
-                    decision_policy_id="practical_gain_v2",
-                    proposed_change=json.dumps(spec.model.model_dump(mode="json"))[:200],
-                ),
-                experiment=spec,
-            )
-            for index, (statement, spec) in enumerate(chosen)
-        )
-        batch = ProposalBatch(
-            previous_result_interpretation=f"Current best is {best_id}.",
-            intent="replan" if context["mode"] == "replan" else "refine",
-            direction=f"improve on {best_id}",
-            candidates=candidates,
-        )
-        return CallOutcome(output=batch, details={"source": "scripted"})
 
 
 # ------------------------------------------------------------------------------ live LLM

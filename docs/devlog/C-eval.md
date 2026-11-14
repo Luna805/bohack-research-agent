@@ -10,6 +10,12 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 19:40–20:00 · yirran（协调人）+ Claude Code，工作树 `c/workbench-ui`（未提交）
+- 做了：删除脚本化提案（`ScriptedProposer`），实验方案只由 LLM 提出。`make_agents`、CLI `--proposer`、矩阵 `proposer` 都只接受 `llm`；删除 `configs/benchmark/final-scripted.yaml`；任务配置和 `dev.yaml` 改为 `proposer: llm`（`dev.yaml` 补上和 `final.yaml` 相同的 LLM 预算）。页面去掉"提案来源"下拉框和离线 Breast Cancer 示例；没有 LLM 配置时显示原因并禁用"开始研究"。测试里的规则替身移到 `tests/conftest.py` 的 `RuleProposer`（来源记为 `fixture`），只用于离线测试。
+- 原因：8594 的工作树没有 `.env`，页面只能走脚本化提案；脚本化规则是照着 Bank 写的，在 Adult 上单独使用明显不如随机搜索。
+- 验证：`pytest -q` 101 passed；`ruff check` / `ruff format --check` 通过；`--proposer scripted` 被 CLI 拒绝；8593 上页面识别到 qwen3.7-plus，Bank 方案卡片显示"实验方案由 LLM 提出（最多 60 次请求、300,000 Token）"。
+- 注意：早期 `results/dev-*` 和本地 `runs/` 里的旧 run 仍是脚本化提案，页面照实标"脚本化"，不能当 LLM 成绩。
+
 ### 2026-11-14 约 16:40–17:20 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`
 - 做了：冻结前修四件事（详见 A、B、D 的日志）：PyArrow 锁定版本、单特征 CSV 崩溃、对话页 LLM 路径、问答 Agent。C 自己的部分：`csv_task.development_rows` / `development_profile`，在注册前复现 `prepare_task` 的开发集，供协议 Agent 起草时使用。
 - 验证：`tests/test_csv_task.py` 新增切分一致性测试（行数、标签、取值逐行相同）；全量测试、ruff 见合并记录。

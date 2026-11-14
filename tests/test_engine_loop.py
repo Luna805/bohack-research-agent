@@ -134,7 +134,7 @@ def _batch(first: Candidate, second: Candidate) -> ProposalBatch:
 
 
 class _SequenceProposer:
-    source = "scripted"
+    source = "fixture"
 
     def __init__(self, batches: list[ProposalBatch]) -> None:
         self.batches = list(batches)
@@ -149,7 +149,7 @@ class _SequenceProposer:
 
 
 class _Critic:
-    source = "scripted"
+    source = "fixture"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -460,7 +460,7 @@ def test_finalize_delivers_candidate_only_after_confirmation(
 ) -> None:
     ctx, state = _context(tmp_path, make_contract)
     (ctx.run_dir / "run_config.json").write_text(
-        json.dumps({"git": None, "proposal_source": "scripted"}), encoding="utf-8"
+        json.dumps({"git": None, "proposal_source": "fixture"}), encoding="utf-8"
     )
     candidate_result = _result("candidate", 0.62)
     candidate_spec = _candidate("candidate", 0.2).experiment

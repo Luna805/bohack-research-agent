@@ -10,7 +10,7 @@
 # If it is interrupted:  python -m budgetlab.benchmark --resume <final-...>
 #
 # Size estimate:
-#   - scripted/random runs (idle Mac on AC power): Bank ~100 s, Adult ~165 s each;
+#   - random-search runs (idle Mac on AC power): Bank ~100 s, Adult ~165 s each;
 #   - real LLM runs (A's measurements on Bank): ~850-930 s and 65k-100k tokens each, dominated by
 #     model latency; Adult is assumed similar or slightly longer.
 #   One repeat = 2 tasks x (1 random + 2 LLM systems) ~ 65-75 min; 3 repeats ~ 3.3-3.8 h serially.

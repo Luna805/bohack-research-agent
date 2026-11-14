@@ -5,6 +5,7 @@ import json
 
 import pytest
 import yaml
+from conftest import RuleProposer
 
 from budgetlab import benchmark
 from budgetlab.benchmark import COLUMNS, MatrixError, load_matrix, plan_slots, run_matrix
@@ -18,8 +19,12 @@ def _write_matrix(tmp_path, smoke_config, **matrix_overrides):
         "tasks": [{"name": "breast_cancer", "config": "task.yaml"}],
         "systems": ["random_search", "budgetlab_no_schedule"],
         "repeats": 1,
-        "proposer": "scripted",
-        "overrides": {"random_search_experiments": 2, "loop": {"max_rounds": 1}},
+        "proposer": "llm",
+        "overrides": {
+            "random_search_experiments": 2,
+            "loop": {"max_rounds": 1},
+            "budget": {"max_llm_requests": 10, "max_llm_tokens": 50_000},
+        },
     }
     matrix.update(matrix_overrides)
     path = tmp_path / "matrix.yaml"
@@ -28,6 +33,8 @@ def _write_matrix(tmp_path, smoke_config, **matrix_overrides):
 
 
 def _run(tmp_path, data_root, matrix_path, **kwargs):
+    # The rule proposer stands in for the LLM so these tests stay offline and free.
+    kwargs.setdefault("proposer_factory", lambda slot: RuleProposer())
     return run_matrix(
         matrix_path,
         runs_root=tmp_path / "runs",
@@ -63,7 +70,7 @@ def test_matrix_writes_interface_files(tmp_path, data_root, smoke_config) -> Non
             "report.md",
         }
     assert rows[0]["proposal_source"] == "none"
-    assert rows[1]["proposal_source"] == "scripted"
+    assert rows[1]["proposal_source"] == "fixture"
     markdown = (out_dir / "aggregate.md").read_text(encoding="utf-8")
     assert "budgetlab_no_schedule" in markdown
     assert "Paired comparison against `random_search`" in markdown
@@ -177,7 +184,9 @@ def test_untracked_code_makes_checkout_dirty_but_outputs_do_not(tmp_path) -> Non
 def test_llm_matrix_preflight_catches_zero_budget_and_missing_model(
     tmp_path, smoke_config, monkeypatch
 ) -> None:
-    matrix_path, _ = _write_matrix(tmp_path, smoke_config, proposer="llm", systems=["budgetlab"])
+    matrix_path, _ = _write_matrix(
+        tmp_path, smoke_config, systems=["budgetlab"], overrides={"loop": {"max_rounds": 1}}
+    )
     slots = plan_slots(load_matrix(matrix_path), tmp_path)
 
     def broken(config, kind):
@@ -201,10 +210,14 @@ def test_llm_matrix_preflight_catches_zero_budget_and_missing_model(
     monkeypatch.setattr(benchmark, "make_agents", lambda config, kind: (object(), None))
     funded = dict(smoke_config)
     funded["budget"] = dict(smoke_config["budget"], max_llm_requests=10, max_llm_tokens=50_000)
-    matrix_path, _ = _write_matrix(tmp_path, funded, proposer="llm", systems=["budgetlab"])
+    matrix_path, _ = _write_matrix(tmp_path, funded, systems=["budgetlab"])
     assert benchmark.preflight(plan_slots(load_matrix(matrix_path), tmp_path)) == []
-    scripted_path, _ = _write_matrix(tmp_path, smoke_config)
-    assert benchmark.preflight(plan_slots(load_matrix(scripted_path), tmp_path)) == []
+
+
+def test_scripted_proposer_is_rejected(tmp_path, smoke_config) -> None:
+    matrix_path, _ = _write_matrix(tmp_path, smoke_config, proposer="scripted")
+    with pytest.raises(MatrixError, match="proposer must be llm"):
+        load_matrix(matrix_path)
 
 
 def _row(task, repeat, system, holdout, *, tokens=0, wall=100.0, dev=0.70, min_effect=0.004):

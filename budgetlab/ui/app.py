@@ -54,9 +54,11 @@ from budgetlab.ui.workbench import (
     history_rows,
     list_entries,
     progress,
+    project_groups,
     round_started_at,
     size_text,
     sort_entries,
+    when_text,
 )
 from budgetlab.ui.workspace import render_branch_map
 
@@ -67,7 +69,6 @@ STORE = EvidenceStore(RUNS, ROOT / "results")
 TASKS = {
     "Bank Marketing": ("bank_marketing", ROOT / "configs/bank_marketing.yaml"),
     "Adult Income": ("adult", ROOT / "configs/adult.yaml"),
-    "Breast Cancer (offline smoke)": ("breast_cancer", ROOT / "configs/night_smoke.yaml"),
 }
 LLM_CALLS = ROOT / "ui_state" / "llm_calls.jsonl"
 QA_CALLS = ROOT / "ui_state" / "qa_calls.jsonl"
@@ -77,7 +78,6 @@ PANEL_TABS = ["实验", "Token", "验证"]
 EXAMPLES = {
     "Bank Marketing": "电话营销：预测客户是否订阅定期存款",
     "Adult Income": "人口普查：预测年收入是否超过 5 万美元",
-    "Breast Cancer (offline smoke)": "不用下载数据，适合断网时检查流程",
 }
 DEMO_CSV = ROOT / "examples" / "student_risk" / "student_risk.csv"
 
@@ -116,18 +116,17 @@ def protocol_card(task_id: str) -> dict:
     return card
 
 
-def launch(task_id: str, config_path: Path, proposer: str) -> dict:
+def launch(task_id: str, config_path: Path) -> dict:
     RUNS.mkdir(exist_ok=True)
     before = {path.name for path in RUNS.iterdir() if path.is_dir()}
-    if proposer == "llm":
-        # Page runs reuse the official matrix's LLM budget and settings; shared configs stay put.
-        base = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        config_path = ROOT / "ui_state" / "configs" / f"{task_id}-llm.yaml"
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(
-            yaml.safe_dump(research_config(base, "llm", ROOT), allow_unicode=True, sort_keys=False),
-            encoding="utf-8",
-        )
+    # Page runs reuse the official matrix's LLM budget and settings; shared configs stay put.
+    base = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config_path = ROOT / "ui_state" / "configs" / f"{task_id}-llm.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        yaml.safe_dump(research_config(base, ROOT), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
     command = [
         sys.executable,
         "-m",
@@ -138,7 +137,7 @@ def launch(task_id: str, config_path: Path, proposer: str) -> dict:
         "--system",
         "budgetlab",
         "--proposer",
-        proposer,
+        "llm",
         "--runs-root",
         str(RUNS),
         "--data-root",
@@ -154,7 +153,7 @@ def launch(task_id: str, config_path: Path, proposer: str) -> dict:
         "before": sorted(before),
         "run_id": None,
         "task_id": task_id,
-        "proposer": proposer,
+        "proposer": "llm",
     }
 
 
@@ -627,6 +626,44 @@ def start_demo_upload() -> None:
     st.session_state["request"] = st.session_state["upload"]["request"]
 
 
+def project_names() -> dict[str, str]:
+    """Projects for the drawer: the built-in tasks, then every registered CSV upload."""
+    names = {task_id: name for name, (task_id, _) in TASKS.items()}
+    uploads = DATA / "uploads"
+    if uploads.is_dir():
+        for meta_path in sorted(uploads.glob("*/task.json")):
+            meta = read_json(meta_path)
+            if meta.get("task_id"):
+                names.setdefault(meta["task_id"], meta.get("source_file_name") or meta["task_id"])
+    return names
+
+
+def toggle_project(task_id: str, default: bool) -> None:
+    opened = st.session_state.setdefault("project_open", {})
+    opened[task_id] = not opened.get(task_id, default)
+
+
+def new_in_project(task_id: str) -> None:
+    """Start a new research draft inside an existing project (task)."""
+    new_research()
+    name = next((name for name, (tid, _) in TASKS.items() if tid == task_id), None)
+    if name:
+        start_example(name)
+        return
+    config_path = ROOT / "ui_state" / "configs" / f"{task_id}.yaml"
+    if not config_path.is_file():
+        base = yaml.safe_load((ROOT / "configs/bank_marketing.yaml").read_text(encoding="utf-8"))
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            yaml.safe_dump(config_for_upload(task_id, base), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+    card = protocol_card(task_id)
+    st.session_state["custom_task"] = (task_id, str(config_path))
+    st.session_state["request"] = card.get("business_question") or card.get("title") or task_id
+    st.session_state.setdefault("project_open", {})[task_id] = True
+
+
 def live(func, running: bool):
     """Refresh a block every 2 seconds only while a run is in progress."""
     return st.fragment(func, run_every="2s" if running else None)
@@ -993,23 +1030,21 @@ def show_setup_flow() -> None:
         )
 
     with st.chat_message("assistant"):
-        run_config = research_config(config, proposer, ROOT)
+        run_config = research_config(config, ROOT)
         budget = run_config["budget"]
-        if proposer == "llm":
-            source = (
-                f"提案来源 `llm`（{run_config['llm'].get('model') or os.environ.get('LLM_MODEL')}，"
-                f"最多 {budget['max_llm_requests']} 次请求、{budget['max_llm_tokens']:,} Token）"
-            )
-        else:
-            source = "提案来源 `scripted`（0 Token）"
+        model = run_config["llm"].get("model") or os.environ.get("LLM_MODEL")
+        source = (
+            f"实验方案由 LLM 提出（{model}，"
+            f"最多 {budget['max_llm_requests']} 次请求、{budget['max_llm_tokens']:,} Token）"
+        )
         st.write(
             f"**研究预算：** 最多 {budget['max_experiments']} 次实验；系统 `budgetlab`，{source}。"
         )
+        if LLM_PROBLEM is not None:
+            st.error(f"{LLM_PROBLEM}。实验方案只由 LLM 提出，配置好之后才能开始研究。")
         ready = (DATA / "prepared" / task_id / "development.csv").is_file()
         if not ready:
-            st.warning(
-                "当前任务数据尚未准备。Bank 和 Adult 首次准备需下载数据；Breast Cancer 可离线准备。"
-            )
+            st.warning("当前任务数据尚未准备，Bank 和 Adult 首次准备需要下载数据。")
             if st.button("准备示例数据", disabled=not confirmed):
                 result = subprocess.run(
                     [
@@ -1032,9 +1067,10 @@ def show_setup_flow() -> None:
                 else:
                     st.rerun()
         if st.button(
-            "开始研究", disabled=not confirmed or not ready or bool(st.session_state.get("job"))
+            "开始研究",
+            disabled=not confirmed or not ready or not llm_on or bool(st.session_state.get("job")),
         ):
-            st.session_state["job"] = launch(task_id, config_path, proposer)
+            st.session_state["job"] = launch(task_id, config_path)
             st.session_state["view_run"] = None
             st.session_state["ws_tab_next"] = "研究路径"
             st.rerun()
@@ -1047,7 +1083,7 @@ def show_compare() -> None:
         matrix, rows, formal = matrix_data
         st.subheader("正式成绩" if formal else "开发数据")
         if not formal:
-            st.warning("这是一轮脚本化提案的开发数据，仅用于搭建和检查页面，不是正式成绩。")
+            st.warning("这是开发数据，仅用于搭建和检查页面，不是正式成绩。")
         st.caption(f"来源：{matrix.parent.relative_to(ROOT)}")
         valid = [row for row in rows if row.get("status") == "ok"]
         with st.container(horizontal=True):
@@ -1504,18 +1540,18 @@ def show_panel(run_id: str | None, running: bool) -> None:
 # ------------------------------------------------------------------------------ drawer
 
 
-def show_drawer(focus: str | None, busy: bool) -> None:
+def show_drawer(focus: str | None, busy: bool, running_id: str | None) -> None:
     with st.container(key="drawer_panel"):
         with st.container(horizontal=True, vertical_alignment="center"):
             st.button(
                 ":material/menu:",
                 key="drawer-close",
-                help="收起研究记录",
+                help="收起项目栏",
                 type="tertiary",
                 on_click=toggle,
                 args=("drawer",),
             )
-            st.markdown("**研究记录**")
+            st.markdown("**项目**")
             st.space("stretch")
             st.button(
                 "新研究",
@@ -1527,49 +1563,95 @@ def show_drawer(focus: str | None, busy: bool) -> None:
             )
         query = (
             st.text_input(
-                "搜索研究记录",
+                "搜索项目和研究记录",
                 key="history_query",
-                placeholder="搜索任务、系统或编号",
+                placeholder="搜索项目、系统或编号",
                 label_visibility="collapsed",
             )
             .strip()
             .lower()
         )
-        rows = [
-            row
-            for row in history_rows(RUNS, STORE.list_runs())
-            if not query
-            or any(
-                query in str(row.get(field) or "").lower()
-                for field in ("title", "task_id", "system", "run_id")
-            )
-        ]
+        names = project_names()
+        groups = project_groups(history_rows(RUNS, STORE.list_runs()), names)
+        if query:
+            fields = ("title", "task_id", "system", "run_id", "source")
+            for group in groups:
+                if query not in group["name"].lower() and query not in group["task_id"].lower():
+                    group["runs"] = [
+                        row
+                        for row in group["runs"]
+                        if any(query in str(row.get(field) or "").lower() for field in fields)
+                    ]
+                    group["hide"] = not group["runs"]
+            groups = [group for group in groups if not group.get("hide")]
+        opened = st.session_state.get("project_open") or {}
+        now = datetime.now().astimezone()
         with st.container(key="history_list"):
-            today = datetime.now().date()
-            last_day = None
-            for row in rows:
-                started = row["started"].astimezone() if row["started"] else None
-                day = started.date() if started else None
-                if day != last_day:
-                    st.caption("今天" if day == today else (day.isoformat() if day else "未知日期"))
-                    last_day = day
-                key = "hist_active" if row["run_id"] == focus else f"hist-{row['run_id']}"
-                with st.container(key=key):
+            for group in groups:
+                task_id, runs = group["task_id"], group["runs"]
+                is_open = bool(query) or opened.get(task_id, bool(runs))
+                active = any(row["run_id"] == focus for row in runs)
+                with st.container(
+                    key=f"proj{'_on' if active else ''}-{task_id}",
+                    horizontal=True,
+                    wrap=False,
+                    vertical_alignment="center",
+                    gap=None,
+                ):
                     st.button(
-                        row["title"],
-                        key=f"open-{row['run_id']}",
+                        group["name"],
+                        key=f"projbtn-{task_id}",
+                        icon=":material/folder_open:" if is_open else ":material/folder:",
                         type="tertiary",
-                        on_click=open_run,
-                        args=(row["run_id"],),
+                        help=EXAMPLES.get(group["name"]) or task_id,
+                        on_click=toggle_project,
+                        args=(task_id, bool(runs)),
+                        width="stretch",
                     )
-                    meta = [row["source"], "已完成" if row["finished"] else "未完成"]
-                    if row["score"]:
-                        meta.append(row["score"])
-                    if started:
-                        meta.append(started.strftime("%H:%M"))
-                    st.caption(" · ".join(meta))
-            if not rows:
-                st.caption("没有匹配的研究记录。")
+                    if runs:
+                        st.caption(str(len(runs)))
+                    if task_id in names:  # retired tasks keep their runs but get no +
+                        st.button(
+                            ":material/add:",
+                            key=f"projnew-{task_id}",
+                            type="tertiary",
+                            disabled=busy,
+                            help=(
+                                "研究运行中，结束后才能开始新研究"
+                                if busy
+                                else f"在「{group['name']}」里新建研究"
+                            ),
+                            on_click=new_in_project,
+                            args=(task_id,),
+                        )
+                if not is_open:
+                    continue
+                with st.container(key=f"projruns-{task_id}", gap=None):
+                    if not runs:
+                        st.caption("还没有研究，点 + 开始")
+                    for row in runs:
+                        row_running = row["run_id"] == running_id
+                        if row_running:
+                            status = "运行中"
+                        elif row["score"]:
+                            status = row["score"]
+                        else:
+                            status = "已完成" if row["finished"] else "未完成"
+                        key = "on-" if row["run_id"] == focus else ""
+                        with st.container(key=f"hrow-{key}{row['run_id']}", gap=None):
+                            st.button(
+                                f"{row['source']} · {status}",
+                                key=f"open-{row['run_id']}",
+                                icon=":material/progress_activity:" if row_running else None,
+                                type="tertiary",
+                                help=f"{row['system']} · {row['run_id']}",
+                                on_click=open_run,
+                                args=(row["run_id"],),
+                                width="stretch",
+                            )
+                            st.caption(when_text(row["started"], now))
+            if not groups:
+                st.caption("没有匹配的项目或研究记录。")
         st.button(
             "系统对比",
             key="drawer-compare",
@@ -1626,8 +1708,41 @@ st.html("""<style>
 .st-key-chat_scroll, .st-key-ws_body, .st-key-exp_body, .st-key-history_list {
   height: 100% !important; overflow-y: auto !important; overflow-x: hidden;
 }
-.st-key-hist_active {background: #EEF3FF; border-radius: 8px; padding: 0 .4rem;}
-.st-key-history_list button {justify-content: flex-start; text-align: left;}
+/* Project drawer: folders with their runs nested underneath, like a file tree. */
+.st-key-history_list {gap: .1rem !important;}
+.st-key-history_list button {justify-content: flex-start; text-align: left; min-height: 0;}
+.st-key-history_list [data-testid="stTooltipHoverTarget"] {justify-content: flex-start;}
+.st-key-history_list button > div {justify-content: flex-start; min-width: 0;}
+.st-key-history_list button p {white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
+[class*="st-key-proj-"], [class*="st-key-proj_on-"] {
+  border-radius: 6px; padding: .1rem .2rem; margin-top: .35rem;
+}
+[class*="st-key-proj-"]:hover, [class*="st-key-proj_on-"]:hover {background: #F2F4F7;}
+[class*="st-key-proj_on-"] [class*="st-key-projbtn-"] p {font-weight: 600;}
+[class*="st-key-projbtn-"] {min-width: 0; flex: 1 1 auto;}
+[class*="st-key-projbtn-"] button {width: 100%; padding: .15rem 0;}
+[class*="st-key-projbtn-"] button:focus:not(:focus-visible) {color: inherit;}
+[class*="st-key-projnew-"] button {opacity: .45; padding: 0 .2rem;}
+[class*="st-key-proj-"]:hover [class*="st-key-projnew-"] button,
+[class*="st-key-proj_on-"]:hover [class*="st-key-projnew-"] button {opacity: 1;}
+[class*="st-key-projruns-"] {
+  padding-left: 1.15rem;
+  background: linear-gradient(#E4E7EC, #E4E7EC) no-repeat left .78rem top 0 / 1px 100%;
+}
+[class*="st-key-projruns-"] > [data-testid="stElementContainer"] p {margin: .1rem .5rem;}
+[class*="st-key-hrow-"] {position: relative;}
+[class*="st-key-hrow-"] button {
+  width: 100%; padding: .2rem 3.6rem .2rem .5rem; border-radius: 6px; color: #344054;
+}
+[class*="st-key-hrow-"] button:hover {background: #F2F4F7;}
+[class*="st-key-hrow-on-"] button, [class*="st-key-hrow-on-"] button:hover {
+  background: #EEF3FF; color: #1D4ED8;
+}
+[class*="st-key-hrow-"] [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"]) {
+  position: absolute; right: .5rem; top: 0; bottom: 0; height: auto !important;
+  width: auto !important; display: flex; align-items: center; pointer-events: none;
+}
+[class*="st-key-hrow-"] [data-testid="stCaptionContainer"] p {margin: 0;}
 .st-key-chat_head {flex-wrap: nowrap !important;}
 .st-key-chat_head [data-testid="stElementContainer"]:has([data-testid="stMarkdown"]) {
   min-width: 0; flex: 0 1 auto;
@@ -1664,7 +1779,7 @@ widths = ([0.62] if drawer_open else []) + [1.35] + ([] if ws_hidden else [1.0])
 columns = st.columns(widths, gap="small")
 if drawer_open:
     with columns[0]:
-        show_drawer(focus, busy)
+        show_drawer(focus, busy, job_dir.name if busy and job_dir else None)
 chat_col = columns[1 if drawer_open else 0]
 
 with chat_col, st.container(key="chat_panel"):
@@ -1699,32 +1814,17 @@ with footer:
             label_visibility="collapsed",
             width=240,
         )
-        choices = ["LLM", "脚本化"] if LLM_PROBLEM is None else ["脚本化"]
-        choice = st.selectbox(
-            "提案",
-            choices,
-            key="proposer_choice",
-            disabled=bool(job),
-            format_func=lambda item: (
-                f"提案 · LLM（{MODEL}）" if item == "LLM" else "提案 · 脚本化（0 Token）"
-            ),
-            label_visibility="collapsed",
-            width=280,
-        )
         if busy:
-            st.caption("运行中，任务和提案来源已锁定")
+            st.caption(f"运行中，任务已锁定 · 实验方案由 {MODEL} 提出")
         elif LLM_PROBLEM is not None:
-            st.caption(f"{LLM_PROBLEM}：只用脚本化提案和快捷问题。")
-        elif choice == "LLM":
-            st.caption("LLM 起草协议、提出实验、回答追问；指标和裁决由程序计算")
+            st.caption(f"{LLM_PROBLEM}：不能开始新研究，只能查看已有研究和快捷问题。")
         else:
-            st.caption("已关闭 LLM：用脚本化提案和快捷问题")
+            st.caption(f"{MODEL} 起草协议、提出实验、回答追问；指标和裁决由程序计算")
     task_id, config_path = TASKS[task_name]
     if st.session_state.get("custom_task"):
         task_id, config_path = st.session_state["custom_task"]
         config_path = Path(config_path)
-    llm_on = choice == "LLM" and LLM_PROBLEM is None
-    proposer = "llm" if llm_on else "scripted"
+    llm_on = LLM_PROBLEM is None
 
 if prompt:
     if finished_focus and not prompt.files and prompt.text.strip():
@@ -1772,7 +1872,7 @@ with head:
         st.button(
             ":material/menu:",
             key="drawer-open",
-            help="打开研究记录",
+            help="打开项目栏",
             type="tertiary",
             on_click=toggle,
             args=("drawer",),

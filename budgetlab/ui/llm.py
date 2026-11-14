@@ -43,10 +43,8 @@ def llm_settings(root: Path) -> LLMSettings:
     return LLMSettings.from_config({"llm": llm_overrides(root).get("llm", {})})
 
 
-def research_config(base: dict[str, Any], proposer: str, root: Path) -> dict[str, Any]:
-    """The config a page run uses: unchanged for scripted, matrix LLM settings for llm."""
-    if proposer != "llm":
-        return base
+def research_config(base: dict[str, Any], root: Path) -> dict[str, Any]:
+    """The config a page run uses: the task config with the official matrix's LLM settings."""
     config = deep_merge(base, llm_overrides(root))
     config["proposer"] = "llm"
     return config

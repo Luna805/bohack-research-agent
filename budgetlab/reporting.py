@@ -112,7 +112,6 @@ def write_report(run_dir: Path, summary: dict[str, Any]) -> Path:
         "re-checked on unseen split seeds), not significance tests.",
         "- The sealed holdout is not read during research; it is scored once after delivery "
         "is frozen (`budgetlab evaluate`).",
-        "- `scripted` proposals are deterministic rules for offline testing, not LLM output.",
     ]
     report.write_text("\n".join(lines) + "\n", encoding="utf-8")
     atomic_write_json(run_dir / "summary.json", summary)

@@ -12,7 +12,7 @@ BudgetLab 是一个预算感知、证据约束的表格分类 Research Agent：L
 ```bash
 uv sync --frozen --extra dev --extra llm
 python -m budgetlab.cli prepare --task bank_marketing
-python -m budgetlab.cli research --config configs/bank_marketing.yaml --system budgetlab --proposer scripted
+python -m budgetlab.cli research --config configs/llm-dev.yaml --system budgetlab   # 提案只来自 LLM，需要 .env
 python -m budgetlab.cli evaluate --run-id <RUN_ID>      # 每个 run 只能评一次
 python -m pytest -q
 ruff check . && ruff format --check budgetlab tests
@@ -27,7 +27,7 @@ ruff check . && ruff format --check budgetlab tests
 5. **字段可用性只看任务说明**（`budgetlab/tasks/cards/*.yaml`）。不要在代码里硬编码"删掉某列"这类规则。
 6. **不能静默改实验**。规格不合法就拒绝并给出原因，不能偷偷降级或改参数后再跑。
 7. **每个结论都要能回溯**。新产物用 `atomic_write_json` 写入，并追加一条 ledger 事件。
-8. **标注要诚实**。`scripted` 不能说成 LLM；没测过的能力不写进 README 和 PPT；数字只取自 `summary.json` / `final_evaluation.json`。
+8. **标注要诚实**。实验方案只由 LLM 提出（脚本化提案已删除，测试里的 `RuleProposer` 只是替身）；早期 `results/dev-*` 是脚本化提案的开发数据，不能说成 LLM；没测过的能力不写进 README 和 PPT；数字只取自 `summary.json` / `final_evaluation.json`。
 
 ## 常见改动的检查清单
 

@@ -1,7 +1,7 @@
 # Development matrix (role C): checks the pipeline end to end on both tasks.
 # Run from the repository root:  python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml
 kind: dev                      # dev | final (final refuses a dirty git checkout)
-description: Bank Marketing and Adult, three systems, scripted proposals, one repeat
+description: Bank Marketing and Adult, three systems, LLM proposals, one repeat
 tasks:
   - name: bank_marketing
     config: configs/bank_marketing.yaml
@@ -9,6 +9,16 @@ tasks:
     config: configs/adult.yaml
 systems: [random_search, budgetlab_no_schedule, budgetlab]
 repeats: 1
-proposer: scripted             # scripted | llm (random_search never uses a proposer)
+proposer: llm                  # the only proposer (random_search never uses one)
 repeat_seed_stride: 1000       # repeat r uses search_seed + (r-1) * stride for every system
-overrides: {}                  # deep-merged into every task config, e.g. {loop: {max_rounds: 6}}
+overrides:                     # deep-merged into every task config
+  budget:                      # LLM proposals need a positive budget (same as final.yaml)
+    max_llm_requests: 60
+    max_llm_tokens: 300000
+  llm:
+    output_mode: tool
+    max_output_tokens: 3000
+    output_retries: 1
+    timeout_seconds: 120
+    extra_body:
+      enable_thinking: false

@@ -2,7 +2,7 @@
 # Authorises real spending: budget.max_llm_tokens / max_llm_requests are positive.
 # Model, base URL and key come from LLM_MODEL / LLM_BASE_URL / LLM_API_KEY in .env, not here.
 task_id: bank_marketing
-proposer: llm              # scripted | llm
+proposer: llm
 cv_folds: 5
 split_seed: 42
 calibration_split_seeds: [11, 23, 37, 53, 71]

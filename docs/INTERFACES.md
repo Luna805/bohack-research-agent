@@ -54,7 +54,7 @@ budget{limits, used, reserved, unknown, tail_reserve, reservations}
 
 各字段的取值：
 - `system` ∈ `random_search` | `budgetlab_no_schedule` | `budgetlab`
-- `proposal_source` ∈ `none` | `scripted` | `llm`
+- `proposal_source` ∈ `none` | `llm`（早期 run 里还有 `scripted`；测试替身写 `fixture`）
 - `origin` ∈ `baseline` | `proposer` | `tool_search`
 - 裁决 ∈ `candidate_pass` | `not_met` | `invalid`；确认 ∈ `confirmed_pass` | `not_met` | `inconclusive` | `not_required_no_candidate`
 - `stop_reason` ∈ `max_rounds` | `diminishing_returns` | `no_valid_candidates` | `budget_exhausted` | `llm_budget_exhausted` | `target_reached` | `experiment_limit` | `space_exhausted`
@@ -93,13 +93,13 @@ evaluate_frozen_run(run_id: str, runs_root: Path) -> dict  # 写 final_evaluatio
 约定：
 - `run_research` 是同步调用，每次生成一个新的 run 目录，不会覆盖已有目录。
 - 训练会占用 CPU，C 的批量脚本要**串行**调用，不要多进程并发跑 run，否则会污染耗时对比。
-- `proposer` 和 `critic` 可以直接传入对象（测试用）；不传时按 `proposer_kind` 或配置里的 `proposer` 构造（`scripted` 或 `llm`）。
+- `proposer` 和 `critic` 可以直接传入对象（测试用）；不传时按 `proposer_kind` 或配置里的 `proposer` 构造，只支持 `llm`（脚本化提案已删除）。
 
 ## 3. Proposer / Critic 协议（A 实现，B 调用）
 
 ```python
 class Proposer(Protocol):          # budgetlab/proposers.py
-    source: str                    # "scripted" | "llm"
+    source: str                    # "llm"（测试替身为 "fixture"）
     def estimate(self, context: dict) -> ResourceVector: ...   # 纯函数；调用前用来预留预算
     def propose(self, context: dict) -> CallOutcome: ...       # 绝不抛异常；失败时 output=None、error 填写原因
 
@@ -211,7 +211,7 @@ kind: dev | final              # final 要求 git 工作区干净
 tasks: [{name: bank_marketing, config: configs/bank_marketing.yaml, overrides: {}}]
 systems: [random_search, budgetlab_no_schedule, budgetlab]
 repeats: 3
-proposer: scripted | llm       # random_search 不使用提案器
+proposer: llm                  # 唯一的提案来源；random_search 不使用提案器
 repeat_seed_stride: 1000       # 第 r 次重复：search_seed + (r-1) × stride，所有系统相同；切分和训练种子不变
 overrides: {}                  # 合并进每个任务配置
 ```
@@ -222,8 +222,8 @@ python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml             # 
 python -m budgetlab.benchmark --resume <matrix_id>                            # 中断后继续；任务配置变了会拒绝
 ```
 
-- `proposer: llm` 的矩阵在开跑前会做检查：每个任务配置的 `max_llm_requests` 和 `max_llm_tokens` 必须为正数，模型名和 Key 必须已配置（只构造对象，不发请求）。`--dry-run` 也会输出检查结果。
-- 正式矩阵的配置：`configs/benchmark/final.yaml`（LLM，两个任务 × 三个系统 × 3 次重复，LLM 预算和输出上限待 A 确认）；拿不到 LLM 时用 `configs/benchmark/final-scripted.yaml`。两份都是 19:30 冻结前的草稿。
+- 矩阵在开跑前会做检查：每个任务配置的 `max_llm_requests` 和 `max_llm_tokens` 必须为正数，模型名和 Key 必须已配置（只构造对象，不发请求）。`--dry-run` 也会输出检查结果。
+- 正式矩阵的配置：`configs/benchmark/final.yaml`（LLM，两个任务 × 三个系统 × 3 次重复，LLM 预算和输出上限待 A 确认）。脚本化提案已删除，没有不用 LLM 的备用矩阵。
 
 ## 6. 经验库（P1，B 提供，A 使用）
 
@@ -308,7 +308,7 @@ config = config_for_upload(task_id, yaml.safe_load(open("configs/bank_marketing.
 
 ### 8.3 后台运行与进度（D 实现，读取第 1 节的 run 目录）
 
-- 启动方式：子进程执行 `python -m budgetlab.cli research --config <生成的配置> --system <系统> --proposer <scripted|llm> --runs-root runs --data-root data`。页面生成的配置写到 `ui_state/configs/`，不要改 `configs/` 下的共享文件。
+- 启动方式：子进程执行 `python -m budgetlab.cli research --config <生成的配置> --system <系统> --proposer llm --runs-root runs --data-root data`。页面生成的配置写到 `ui_state/configs/`，不要改 `configs/` 下的共享文件。
 - 识别本次的 run 目录：启动前记下 `runs/` 里已有哪些目录，启动后新出现的那一个就是。进程信息写到 `ui_state/launches.jsonl`，页面刷新后可以重新接上。
 - 步骤卡片只根据 `events.jsonl` 的 `event_type`、`rounds/round-NN.json` 和 `experiments/<id>.json` 渲染，不解析日志文本。对应关系如下：
 

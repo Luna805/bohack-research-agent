@@ -53,7 +53,6 @@ from .proposers import (
     Proposer,
     PydanticAICritic,
     PydanticAIProposer,
-    ScriptedProposer,
     build_context,
     load_dotenv,
 )
@@ -1010,13 +1009,12 @@ def _summary(
 
 
 def make_agents(config: dict[str, Any], proposer_kind: str) -> tuple[Proposer, Critic | None]:
-    if proposer_kind == "scripted":
-        return ScriptedProposer(), None
-    if proposer_kind == "llm":
-        load_dotenv(PROJECT_ROOT / ".env")
-        settings = LLMSettings.from_config(config)
-        return PydanticAIProposer(settings), PydanticAICritic(settings)
-    raise ValueError(f"unknown proposer kind: {proposer_kind}")
+    """The hosted LLM proposer and critic; there is no rule-based fallback."""
+    if proposer_kind != "llm":
+        raise ValueError(f"unknown proposer kind: {proposer_kind!r} (only 'llm' is supported)")
+    load_dotenv(PROJECT_ROOT / ".env")
+    settings = LLMSettings.from_config(config)
+    return PydanticAIProposer(settings), PydanticAICritic(settings)
 
 
 def _record_run_failure(ctx: RunContext, phase: str, exc: Exception) -> None:
@@ -1051,7 +1049,7 @@ def run_research(
 ) -> dict[str, Any]:
     if system != "random_search" and proposer is None:
         proposer, default_critic = make_agents(
-            config, proposer_kind or config.get("proposer", "scripted")
+            config, proposer_kind or config.get("proposer", "llm")
         )
         critic = critic or default_critic
     source = "none" if system == "random_search" else proposer.source  # type: ignore[union-attr]

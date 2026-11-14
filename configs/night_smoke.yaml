@@ -1,6 +1,6 @@
 # Fast plumbing smoke on the saturated scikit-learn breast-cancer data (not a research claim).
 task_id: breast_cancer
-proposer: scripted
+proposer: llm
 cv_folds: 5
 split_seed: 42
 calibration_split_seeds: [11, 23, 37]

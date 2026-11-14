@@ -1,6 +1,6 @@
 # Development / demo task: predict before the call whether the client subscribes.
 task_id: bank_marketing
-proposer: scripted          # scripted | llm  (CLI --proposer overrides)
+proposer: llm               # the only proposer; LLM budget below must be > 0 (or set by the matrix/page)
 cv_folds: 5
 split_seed: 42
 calibration_split_seeds: [11, 23, 37, 53, 71]

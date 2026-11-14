@@ -16,8 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_llm_runs_use_the_official_matrix_settings() -> None:
     base = yaml.safe_load((ROOT / "configs" / "bank_marketing.yaml").read_text(encoding="utf-8"))
-    assert research_config(base, "scripted", ROOT) == base
-    config = research_config(base, "llm", ROOT)
+    config = research_config(base, ROOT)
     overrides = llm_overrides(ROOT)
     assert config["proposer"] == "llm"
     assert config["budget"]["max_llm_requests"] == overrides["budget"]["max_llm_requests"] > 0

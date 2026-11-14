@@ -69,7 +69,7 @@ def test_gbk_semicolon_csv_is_read(tmp_path) -> None:
     assert frame.shape == _frame().shape
 
 
-def test_uploaded_csv_runs_end_to_end(tmp_path, smoke_config) -> None:
+def test_uploaded_csv_runs_end_to_end(tmp_path, smoke_config, rule_proposer) -> None:
     data_root = tmp_path / "data"
     frame = _frame()
     path = _write(frame, tmp_path / "upload.csv", sep=";", encoding="gbk")
@@ -90,7 +90,9 @@ def test_uploaded_csv_runs_end_to_end(tmp_path, smoke_config) -> None:
 
     config = config_for_upload(task_id, smoke_config)
     config["loop"] = {"max_rounds": 1, "initial_tool_search": 0, "stagnation_stop": 3}
-    summary = run_research(config, "budgetlab_no_schedule", tmp_path / "runs", data_root)
+    summary = run_research(
+        config, "budgetlab_no_schedule", tmp_path / "runs", data_root, proposer=rule_proposer
+    )
     run_dir = tmp_path / "runs" / summary["run_id"]
     contract = json.loads((run_dir / "contract.json").read_text(encoding="utf-8"))
     approved = set(contract["approved_feature_columns"])

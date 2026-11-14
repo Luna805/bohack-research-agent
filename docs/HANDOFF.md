@@ -28,7 +28,7 @@ ruff check .
 | W06 LLM 接入 | ✅ | 真实模型 `qwen3.7-plus`（tool 模式，`extra_body` 关闭思考，单次输出上限 3000）已接通；A 在 Bank 上跑了两次真实 LLM 研究：探索最优 0.712，确认通过，每次 6.5 万–10 万 Token、约 15 分钟 |
 | W07 主循环 | ✅ | 两个候选、筛查与去重、便宜时都跑、停止规则、工具搜索调度、重规划、方向归因 |
 | W08 冻结与最终评测 | ✅ | `evaluate` 每个 run 只能评一次，第二次报错 |
-| W09 正式对照矩阵 | ⚠️ 准备完成 | 矩阵脚本 `python -m budgetlab.benchmark`（串行、逐个 holdout 评测、可续跑、final 要求代码干净、LLM 开跑前检查）；`configs/benchmark/final.yaml`（LLM）和 `final-scripted.yaml`（备用）为草稿；**正式运行在 20:00** |
+| W09 正式对照矩阵 | ⚠️ 准备完成 | 矩阵脚本 `python -m budgetlab.benchmark`（串行、逐个 holdout 评测、可续跑、final 要求代码干净、LLM 开跑前检查）；`configs/benchmark/final.yaml`（LLM）为草稿（脚本化备用配置已随脚本化提案删除）；**正式运行在 20:00** |
 | W10 展示与材料 | ⚠️ 进行中 | 对话页第一版已合入（`budgetlab/ui/app.py`：示例任务、后台运行、0 Token 快捷问答）；CSV 上传、开放问答、PPT 未完成 |
 | 第二个任务 | ✅ | UCI Adult（改为不做 MLE-bench），`configs/adult.yaml` |
 | 通用 CSV 上传 | ✅ | `budgetlab/tasks/csv_task.py`；原始 Bank CSV 上传后的结果与内置任务完全一致 |
@@ -70,8 +70,8 @@ budgetlab/
   reporting.py / cli.py  报告模板；命令行 prepare / research / evaluate / probe-llm / reproduce / replay
 configs/bank_marketing.yaml   正式开发配置（预算、循环策略、LLM 设置都在这里）
 configs/adult.yaml            第二个任务
-configs/benchmark/            dev.yaml（两个任务的开发矩阵）、final.yaml、final-scripted.yaml
-configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
+configs/benchmark/            dev.yaml（两个任务的开发矩阵，LLM）、final.yaml
+configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置（需要 LLM 预算）
 ```
 
 三个系统：`random_search`（0 Token）、`budgetlab_no_schedule`（消融组：只有提案循环 + 去重 + 预算 + 停止规则）、`budgetlab`（在此基础上加工具搜索调度、重规划和按需 Critic）。

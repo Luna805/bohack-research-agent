@@ -8,13 +8,15 @@ from budgetlab.controller import replay_run, reproduce_run, run_research
 from budgetlab.evaluation import evaluate_frozen_run
 
 
-def test_scripted_loop_real_training_holdout_reproduce_and_replay(
-    tmp_path, data_root, smoke_config
+def test_loop_real_training_holdout_reproduce_and_replay(
+    tmp_path, data_root, smoke_config, rule_proposer
 ) -> None:
-    summary = run_research(smoke_config, "budgetlab", tmp_path / "runs", data_root)
+    summary = run_research(
+        smoke_config, "budgetlab", tmp_path / "runs", data_root, proposer=rule_proposer
+    )
     run_id = summary["run_id"]
     run_dir = tmp_path / "runs" / run_id
-    assert summary["proposal_source"] == "scripted"
+    assert summary["proposal_source"] == "fixture"
     assert summary["summary_version"] == 1
     assert summary["counts"]["rounds"] >= 1
     assert summary["counts"]["proposer_experiments"] >= 2

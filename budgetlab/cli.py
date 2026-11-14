@@ -38,7 +38,7 @@ def doctor(config_path: Path) -> dict[str, Any]:
         "status": "ok",
         "config": str(config_path),
         "task_id": config["task_id"],
-        "proposer": config.get("proposer", "scripted"),
+        "proposer": config.get("proposer", "llm"),
         "llm_budget": {
             "requests": budget.get("max_llm_requests", 0),
             "tokens": budget.get("max_llm_tokens", 0),
@@ -94,7 +94,7 @@ def build_parser() -> argparse.ArgumentParser:
     research = commands.add_parser("research", help="run one research system end to end")
     research.add_argument("--config", type=Path, required=True)
     research.add_argument("--system", choices=SYSTEMS, required=True)
-    research.add_argument("--proposer", choices=["scripted", "llm"], default=None)
+    research.add_argument("--proposer", choices=["llm"], default=None)
     research.add_argument("--runs-root", type=Path, default=Path("runs"))
     research.add_argument("--data-root", type=Path, default=Path("data"))
     evaluate = commands.add_parser("evaluate", help="score a frozen delivery once on the holdout")
