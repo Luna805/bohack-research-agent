@@ -12,10 +12,13 @@ from .budget import Budget
 from .ledger import EventLedger, atomic_write_json
 from .schemas import ExecutionResult, ExperimentSpec, ResourceVector, TaskContract
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 class Runner:
-    def __init__(self, run_dir: Path, ledger: EventLedger, budget: Budget) -> None:
-        self.run_dir = run_dir
+    def __init__(self, run_dir: Path, ledger: EventLedger, budget: Budget, data_root: Path) -> None:
+        self.run_dir = run_dir.resolve()
+        self.data_root = data_root.resolve()
         self.ledger = ledger
         self.budget = budget
         (run_dir / "work").mkdir(parents=True, exist_ok=True)
@@ -45,6 +48,7 @@ class Runner:
         model_path = self.run_dir / "delivery" / "model.joblib"
         payload = {
             "dataset_ref": contract.dataset_ref,
+            "data_root": str(self.data_root),
             "spec": spec.model_dump(mode="json"),
             "contract": contract.model_dump(mode="json"),
             "purpose": purpose,
@@ -83,7 +87,7 @@ class Runner:
                     "--result",
                     str(result_path),
                 ],
-                cwd=Path.cwd(),
+                cwd=PROJECT_ROOT,
                 env=env,
                 capture_output=True,
                 text=True,

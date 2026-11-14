@@ -26,6 +26,7 @@ def calibrate(
 def evaluate_candidate(
     candidate: ExecutionResult, baseline: ExecutionResult, min_effect: float
 ) -> EvaluationRecord:
+    """Paired same-fold comparison against ``baseline`` (any frozen comparator)."""
     evidence = (candidate.artifact_ref, baseline.artifact_ref)
     if candidate.status != "ok" or baseline.status != "ok":
         status = candidate.status if candidate.status != "ok" else baseline.status
@@ -33,6 +34,7 @@ def evaluate_candidate(
             experiment_id=candidate.experiment_id,
             execution_status=status,
             policy_status="invalid",
+            comparator_experiment_id=baseline.experiment_id,
             evidence_refs=evidence,
         )
     if len(candidate.fold_scores) != len(baseline.fold_scores):
@@ -40,6 +42,7 @@ def evaluate_candidate(
             experiment_id=candidate.experiment_id,
             execution_status="invalid",
             policy_status="invalid",
+            comparator_experiment_id=baseline.experiment_id,
             evidence_refs=evidence,
         )
     deltas = tuple(
@@ -56,6 +59,7 @@ def evaluate_candidate(
         mean_score=candidate.mean_score,
         mean_paired_delta=mean_delta,
         fold_scores=candidate.fold_scores,
+        comparator_experiment_id=baseline.experiment_id,
         evidence_refs=evidence,
     )
 

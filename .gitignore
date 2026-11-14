@@ -224,3 +224,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# BudgetLab datasets: raw downloads, prepared development data and sealed holdouts
+data/raw/
+data/prepared/
+data/sealed/

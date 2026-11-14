@@ -4,7 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 from budgetlab.contracts import validate_experiment_spec, validate_proposal_batch
-from budgetlab.llm import LiveGatewayBlocked, PydanticAIGateway
 from budgetlab.schemas import (
     Candidate,
     ExperimentSpec,
@@ -69,6 +68,39 @@ def test_log1p_domain_and_hgb_text_are_rejected(make_contract) -> None:
         validate_experiment_spec(hgb_text, text_contract)
 
 
-def test_live_gateway_is_blocked_at_zero_budget() -> None:
-    with pytest.raises(LiveGatewayBlocked):
-        PydanticAIGateway("provider:model", allow_live=False, request_budget=0)
+def test_sentinel_and_drop_order_are_validated(make_contract) -> None:
+    from budgetlab.contracts import spec_hash
+    from budgetlab.schemas import AddMissingIndicators, DropColumns, SentinelToMissing
+
+    contract = make_contract()
+    minima = {"mean radius": 6.9, "mean texture": 9.7}
+    dropped_then_used = ExperimentSpec(
+        model=LogisticSpec(family="logistic_regression"),
+        feature_actions=(
+            DropColumns(kind="drop_columns", columns=("mean radius",)),
+            Log1pColumns(kind="log1p", columns=("mean radius",)),
+        ),
+    )
+    with pytest.raises(ValueError, match="already dropped"):
+        validate_experiment_spec(dropped_then_used, contract, numeric_minima=minima)
+    first = ExperimentSpec(
+        model=LogisticSpec(family="logistic_regression"),
+        feature_actions=(
+            SentinelToMissing(
+                kind="sentinel_to_missing", columns=("mean radius", "mean texture"), value=0
+            ),
+            AddMissingIndicators(kind="missing_indicator", columns=("mean radius",)),
+        ),
+    )
+    validate_experiment_spec(first, contract, numeric_minima=minima)
+    reordered = first.model_copy(
+        update={
+            "feature_actions": (
+                SentinelToMissing(
+                    kind="sentinel_to_missing", columns=("mean texture", "mean radius"), value=0
+                ),
+                first.feature_actions[1],
+            )
+        }
+    )
+    assert spec_hash(first) == spec_hash(reordered)

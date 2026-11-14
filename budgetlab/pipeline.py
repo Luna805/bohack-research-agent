@@ -46,6 +46,12 @@ def apply_feature_actions(features: pd.DataFrame, actions: tuple[object, ...]) -
         elif action.kind == "missing_indicator":
             for column in action.columns:
                 transformed[f"{column}__missing"] = transformed[column].isna().astype(float)
+        elif action.kind == "sentinel_to_missing":
+            for column in action.columns:
+                if not pd.api.types.is_numeric_dtype(transformed[column]):
+                    raise ValueError(f"sentinel_to_missing requires a numeric column: {column}")
+                values = transformed[column].astype(float)
+                transformed[column] = values.where(values != action.value)
         else:
             raise ValueError(f"unsupported feature action: {action.kind}")
     return transformed
@@ -153,6 +159,7 @@ def build_pipeline(spec: ExperimentSpec, features: pd.DataFrame, training_seed: 
             max_iter=model.max_iter,
             max_leaf_nodes=model.max_leaf_nodes,
             min_samples_leaf=model.min_samples_leaf,
+            class_weight=model.class_weight,
             random_state=training_seed,
         )
     else:

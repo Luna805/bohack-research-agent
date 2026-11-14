@@ -1,0 +1,50 @@
+task_id: bank_marketing
+title: Bank term-deposit telemarketing
+source: >-
+  UCI Machine Learning Repository, Bank Marketing (bank-additional-full.csv, Moro et al. 2014).
+  Portuguese bank direct-marketing phone campaigns, May 2008 to November 2010.
+business_question: >-
+  Before an agent places the next outbound marketing call, estimate whether the client will
+  subscribe to a term deposit, so the call list can be prioritised.
+prediction_time: before the outbound marketing call is placed
+decision_use: rank and filter the call list; both missed subscribers and wasted calls matter
+error_costs: >-
+  A missed subscriber loses revenue; a wasted call costs agent time. Neither class dominates,
+  so the frozen metric is macro-F1 over the two classes.
+entity: one row per client contact record; there is no client identifier in the file
+deployment_data: future call lists drawn from the same bank and campaign process
+target:
+  column: y
+  positive_label: "yes"
+  description: has the client subscribed to a term deposit
+missing_values: several categorical fields encode missing values as the label "unknown"
+fields:
+  - {name: age, group: client, type: numeric, availability: available, description: age in years}
+  - {name: job, group: client, type: categorical, availability: available, description: type of job}
+  - {name: marital, group: client, type: categorical, availability: available, description: marital status; divorced includes widowed}
+  - {name: education, group: client, type: categorical, availability: available, description: education level}
+  - {name: default, group: client, type: categorical, availability: available, description: has credit in default}
+  - {name: housing, group: client, type: categorical, availability: available, description: has a housing loan}
+  - {name: loan, group: client, type: categorical, availability: available, description: has a personal loan}
+  - {name: contact, group: current_campaign, type: categorical, availability: available, description: contact channel (cellular or telephone)}
+  - {name: month, group: current_campaign, type: categorical, availability: available, description: month of the last contact}
+  - {name: day_of_week, group: current_campaign, type: categorical, availability: available, description: weekday of the last contact}
+  - name: duration
+    group: current_campaign
+    type: numeric
+    availability: post_outcome
+    description: duration of the last contact in seconds
+    note: >-
+      Only known after the call ends, when the outcome is also known. The dataset notes say it
+      should be discarded for a realistic predictive model.
+  - {name: campaign, group: current_campaign, type: numeric, availability: available, description: number of contacts in this campaign for this client, including the planned one}
+  - {name: pdays, group: history, type: numeric, availability: available, description: days since the client was last contacted in a previous campaign; 999 means never contacted before}
+  - {name: previous, group: history, type: numeric, availability: available, description: number of contacts before this campaign}
+  - {name: poutcome, group: history, type: categorical, availability: available, description: outcome of the previous campaign}
+  - {name: emp.var.rate, group: economy, type: numeric, availability: available, description: employment variation rate (quarterly)}
+  - {name: cons.price.idx, group: economy, type: numeric, availability: available, description: consumer price index (monthly)}
+  - {name: cons.conf.idx, group: economy, type: numeric, availability: available, description: consumer confidence index (monthly)}
+  - {name: euribor3m, group: economy, type: numeric, availability: available, description: euribor 3-month rate (daily)}
+  - {name: nr.employed, group: economy, type: numeric, availability: available, description: number of employees (quarterly)}
+known_limitations:
+  - Rows are ordered in time and the economy indicators move with time, so a random stratified split is optimistic for future campaigns. Time-based splits are out of scope for this version.

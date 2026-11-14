@@ -63,8 +63,26 @@ def freeze_contract(
             confirmation_split_seeds=protocol.confirmation_split_seeds,
         ),
         budgets=protocol.budgets,
+        loop_policy=protocol.loop_policy,
+        sealed_holdout_sha256=protocol.sealed_holdout_sha256,
         memory_snapshot_hash=memory_snapshot_hash,
     )
+
+
+def canonical_spec(spec: ExperimentSpec) -> dict[str, Any]:
+    """Spec dump with column lists sorted, so reordered columns count as the same experiment."""
+    value = spec.model_dump(mode="json")
+    for action in value["feature_actions"]:
+        action["columns"] = sorted(action["columns"])
+    if value["preprocessing"].get("text"):
+        value["preprocessing"]["text"]["columns"] = sorted(
+            value["preprocessing"]["text"]["columns"]
+        )
+    return value
+
+
+def spec_hash(spec: ExperimentSpec) -> str:
+    return stable_hash(canonical_spec(spec))
 
 
 def validate_experiment_spec(
@@ -76,14 +94,27 @@ def validate_experiment_spec(
     approved = set(contract.approved_feature_columns)
     if spec.model.family not in contract.allowed_model_families:
         raise ValueError("model family is not allowed by the contract")
-    for action in spec.feature_actions:
-        unknown = set(action.columns) - approved
+    present = set(approved)
+    for index, action in enumerate(spec.feature_actions):
+        unknown = set(action.columns) - present
         if unknown:
-            raise ValueError(f"feature action references unapproved columns: {sorted(unknown)}")
+            raise ValueError(
+                f"feature action {index} ({action.kind}) references columns that are not approved"
+                f" or were already dropped: {sorted(unknown)}"
+            )
+        numeric_only = action.kind in {"log1p", "sentinel_to_missing"}
+        if numeric_only and numeric_minima is not None:
+            non_numeric = [column for column in action.columns if column not in numeric_minima]
+            if non_numeric:
+                raise ValueError(f"{action.kind} requires numeric columns: {non_numeric}")
         if action.kind == "log1p" and numeric_minima is not None:
             invalid = [column for column in action.columns if numeric_minima.get(column, -2) <= -1]
             if invalid:
-                raise ValueError(f"log1p domain violation: {invalid}")
+                raise ValueError(f"log1p domain violation (values <= -1): {invalid}")
+        if action.kind == "drop_columns":
+            present -= set(action.columns)
+            if not present:
+                raise ValueError("feature actions drop every approved column")
     text = spec.preprocessing.text
     if text is not None:
         if not set(text.columns).issubset(set(contract.text_columns)):

@@ -1,14 +1,31 @@
+"""Trusted data preparation and the development-only loader.
+
+``prepare_task`` is the only code that sees the full labelled dataset. It writes two files:
+
+* ``<data_root>/prepared/<task>/development.csv`` - the only data the research loop, the
+  runner and the proposer context are built from;
+* ``<data_root>/sealed/<task>/holdout.csv`` - read only by ``budgetlab.evaluation`` after a
+  run's delivery is frozen.
+
+This is a file-level boundary inside one machine, not an OS sandbox.
+"""
+
 from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import pandas as pd
-from sklearn.datasets import load_breast_cancer
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from .contracts import stable_hash
+from .ledger import atomic_write_json
+from .tasks import get_task
+
+ROW_ID = "__row_id__"
 
 
 @dataclass(frozen=True)
@@ -21,24 +38,86 @@ class DatasetBundle:
     target_column: str
 
 
-def load_dataset(dataset_ref: str = "sklearn:breast_cancer") -> DatasetBundle:
-    if dataset_ref != "sklearn:breast_cancer":
-        raise ValueError(f"unsupported offline dataset: {dataset_ref}")
-    raw = load_breast_cancer(as_frame=True)
-    features = raw.data.copy()
-    target = raw.target.astype(int).rename("target")
-    row_hashes = pd.util.hash_pandas_object(features, index=True).astype(str)
-    row_ids = tuple(f"breast-cancer:{index}:{digest}" for index, digest in row_hashes.items())
-    digest = hashlib.sha256()
-    digest.update(features.to_csv(index=False, float_format="%.17g").encode("utf-8"))
-    digest.update(target.to_csv(index=False).encode("utf-8"))
+def development_path(data_root: Path, task_id: str) -> Path:
+    return data_root / "prepared" / task_id / "development.csv"
+
+
+def manifest_path(data_root: Path, task_id: str) -> Path:
+    return data_root / "prepared" / task_id / "manifest.json"
+
+
+def sealed_holdout_path(data_root: Path, task_id: str) -> Path:
+    return data_root / "sealed" / task_id / "holdout.csv"
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_frame(frame: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(path, index=False, float_format="%.17g", lineterminator="\n")
+
+
+def prepare_task(task_id: str, data_root: Path, *, force: bool = False) -> dict[str, Any]:
+    """Split the raw dataset once into development data and a sealed stratified holdout."""
+    task = get_task(task_id)
+    dev_path = development_path(data_root, task_id)
+    holdout_path = sealed_holdout_path(data_root, task_id)
+    meta_path = manifest_path(data_root, task_id)
+    if dev_path.exists() and holdout_path.exists() and meta_path.exists() and not force:
+        import json
+
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    features, target = task.load_raw(data_root / "raw" / task_id)
+    frame = features.copy()
+    frame.insert(0, ROW_ID, [f"{task_id}:{index}" for index in range(len(frame))])
+    frame[task.target_column] = target.to_numpy()
+    positions = list(range(len(frame)))
+    dev_positions, holdout_positions = train_test_split(
+        positions,
+        test_size=task.holdout_fraction,
+        stratify=target,
+        random_state=task.holdout_seed,
+    )
+    development = frame.iloc[sorted(dev_positions)].reset_index(drop=True)
+    holdout = frame.iloc[sorted(holdout_positions)].reset_index(drop=True)
+    _write_frame(development, dev_path)
+    _write_frame(holdout, holdout_path)
+    manifest = {
+        "task_id": task_id,
+        "target_column": task.target_column,
+        "holdout_fraction": task.holdout_fraction,
+        "holdout_seed": task.holdout_seed,
+        "development_rows": len(development),
+        "development_positive_rate": float(development[task.target_column].mean()),
+        "development_sha256": file_sha256(dev_path),
+        "holdout_rows": len(holdout),
+        "holdout_sha256": file_sha256(holdout_path),
+        "scenario_card_hash": stable_hash(task.card),
+    }
+    atomic_write_json(meta_path, manifest)
+    return manifest
+
+
+def load_development(task_id: str, data_root: Path) -> DatasetBundle:
+    """Load development rows only. Holdout rows are not in this file."""
+    task = get_task(task_id)
+    path = development_path(data_root, task_id)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing; run `python -m budgetlab.cli prepare --task {task_id}` first"
+        )
+    frame = pd.read_csv(path)
+    row_ids = tuple(frame.pop(ROW_ID).astype(str))
+    target = frame.pop(task.target_column).astype(int).rename(task.target_column)
     return DatasetBundle(
-        dataset_ref=dataset_ref,
-        features=features,
+        dataset_ref=task_id,
+        features=frame,
         target=target,
         row_ids=row_ids,
-        dataset_hash=digest.hexdigest(),
-        target_column="target",
+        dataset_hash=file_sha256(path),
+        target_column=task.target_column,
     )
 
 
@@ -60,7 +139,7 @@ def split_manifest(
             folds.append(
                 {
                     "fold": fold_index,
-                    "train_row_ids": [bundle.row_ids[index] for index in train],
+                    "train_rows": len(train),
                     "valid_row_ids": [bundle.row_ids[index] for index in valid],
                 }
             )

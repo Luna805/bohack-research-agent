@@ -5,7 +5,7 @@ import json
 import pandas as pd
 
 from budgetlab.budget import Budget
-from budgetlab.data import load_dataset, split_manifest
+from budgetlab.data import load_development, split_manifest
 from budgetlab.ledger import EventLedger
 from budgetlab.pipeline import build_pipeline, score_predictions
 from budgetlab.runner import Runner
@@ -19,21 +19,21 @@ from budgetlab.schemas import (
 from budgetlab.search import baseline_spec
 
 
-def test_split_manifest_is_deterministic() -> None:
-    bundle = load_dataset()
+def test_split_manifest_is_deterministic(data_root) -> None:
+    bundle = load_development("breast_cancer", data_root)
     first, first_hash = split_manifest(bundle, [42], 3)
     second, second_hash = split_manifest(bundle, [42], 3)
     assert first == second
     assert first_hash == second_hash
-    assert set(first["splits"][0]["folds"][0]) == {"fold", "train_row_ids", "valid_row_ids"}
+    assert set(first["splits"][0]["folds"][0]) == {"fold", "train_rows", "valid_row_ids"}
 
 
-def test_real_pipeline_fit_and_text_branch() -> None:
-    bundle = load_dataset()
+def test_real_pipeline_fit_and_text_branch(data_root) -> None:
+    bundle = load_development("breast_cancer", data_root)
     pipeline = build_pipeline(baseline_spec(), bundle.features, 42)
-    pipeline.fit(bundle.features.iloc[:400], bundle.target.iloc[:400])
+    pipeline.fit(bundle.features.iloc[:300], bundle.target.iloc[:300])
     score = score_predictions(
-        "f1_macro", bundle.target.iloc[400:], pipeline, bundle.features.iloc[400:]
+        "f1_macro", bundle.target.iloc[300:], pipeline, bundle.features.iloc[300:]
     )
     assert 0 <= score <= 1
 
@@ -53,13 +53,13 @@ def test_real_pipeline_fit_and_text_branch() -> None:
     assert len(text_pipeline.predict(features)) == 4
 
 
-def test_runner_timeout_preserves_unknown_fit_usage(tmp_path, make_contract) -> None:
+def test_runner_timeout_preserves_unknown_fit_usage(tmp_path, make_contract, data_root) -> None:
     contract = make_contract(timeout=1, cv_folds=2, max_fits=10)
     ledger = EventLedger("timeout-run", tmp_path)
     budget = Budget(
         contract.budgets, tmp_path / "budget.json", ledger, tail_reserve=ResourceVector()
     )
-    result = Runner(tmp_path, ledger, budget).execute(
+    result = Runner(tmp_path, ledger, budget, data_root).execute(
         baseline_spec(),
         contract,
         purpose="timeout-test",

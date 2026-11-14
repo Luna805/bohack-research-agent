@@ -1,0 +1,18 @@
+task_id: breast_cancer
+title: Breast cancer diagnosis (engineering smoke task)
+source: scikit-learn bundled Wisconsin diagnostic breast cancer dataset
+business_question: classify a tumour sample as benign or malignant from diagnostic image features
+prediction_time: diagnostic features are available at classification time
+decision_use: offline engineering smoke test only; not a research claim
+error_costs: macro-F1 over both classes
+entity: one row per sample
+deployment_data: not applicable
+target:
+  column: target
+  positive_label: 1
+  description: scikit-learn label (1 = benign)
+missing_values: none
+fields: []
+default_availability: available
+known_limitations:
+  - Near-saturated benchmark; useful for plumbing tests, not for showing research gains.

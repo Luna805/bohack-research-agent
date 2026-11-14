@@ -43,8 +43,17 @@ class AddMissingIndicators(StrictModel):
     columns: tuple[str, ...] = Field(min_length=1)
 
 
+class SentinelToMissing(StrictModel):
+    """Replace a documented placeholder value (for example 999) with a missing value."""
+
+    kind: Literal["sentinel_to_missing"]
+    columns: tuple[str, ...] = Field(min_length=1, max_length=4)
+    value: float
+
+
 FeatureAction = Annotated[
-    DropColumns | Log1pColumns | AddMissingIndicators, Field(discriminator="kind")
+    DropColumns | Log1pColumns | AddMissingIndicators | SentinelToMissing,
+    Field(discriminator="kind"),
 ]
 
 
@@ -69,6 +78,7 @@ class HistBoostSpec(StrictModel):
     max_iter: int = Field(default=100, ge=20, le=300)
     max_leaf_nodes: int = Field(default=31, ge=2, le=63)
     min_samples_leaf: int = Field(default=20, ge=2, le=100)
+    class_weight: Literal["balanced"] | None = None
 
 
 ModelSpec = Annotated[LogisticSpec | ForestSpec | HistBoostSpec, Field(discriminator="family")]
@@ -102,6 +112,16 @@ class ProposalBatch(StrictModel):
     candidates: tuple[Candidate, ...] = Field(min_length=2, max_length=2)
 
 
+class CriticAdvice(StrictModel):
+    """Advisory only: it never changes metrics, verdicts, budgets or stop rules."""
+
+    explanation: str = Field(min_length=1)
+    evidence_refs: tuple[str, ...] = Field(min_length=1)
+    next_focus: str = Field(min_length=1)
+    avoid: tuple[str, ...] = Field(default=(), max_length=5)
+    lesson_drafts: tuple[str, ...] = Field(default=(), max_length=3)
+
+
 class EvaluationRecord(StrictModel):
     experiment_id: str
     execution_status: Literal["ok", "failed", "timeout", "invalid"]
@@ -110,6 +130,7 @@ class EvaluationRecord(StrictModel):
     mean_paired_delta: float | None = None
     fold_scores: tuple[float, ...] = ()
     confirmation_deltas: tuple[float, ...] = ()
+    comparator_experiment_id: str | None = None
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     computed_by: Literal["evaluator"] = "evaluator"
 
@@ -126,13 +147,28 @@ class ResourceVector(StrictModel):
 class BudgetLimits(StrictModel):
     max_llm_tokens: int = Field(default=0, ge=0)
     max_llm_requests: int = Field(default=0, ge=0)
-    max_cost_usd: float | None = Field(default=0.0, ge=0)
+    max_cost_usd: float | None = Field(default=None, ge=0)
     max_experiments: int = Field(gt=0)
     max_fits: int = Field(gt=0)
+    max_tool_search_fits: int = Field(default=30, ge=0)
     max_total_seconds: int = Field(gt=0)
-    experiment_timeout_seconds: int = Field(default=120, gt=0, le=120)
+    experiment_timeout_seconds: int = Field(default=120, gt=0, le=600)
     max_repairs_per_spec: Literal[1] = 1
     max_empty_proposal_rounds: int = Field(default=2, ge=1)
+
+
+class LoopPolicy(StrictModel):
+    """Frozen research-loop rules. Every trigger reads development results only."""
+
+    max_rounds: int = Field(default=8, ge=1, le=50)
+    initial_tool_search: int = Field(default=2, ge=0, le=10)
+    tool_search_batch: int = Field(default=2, ge=1, le=10)
+    stagnation_tool_search: int = Field(default=2, ge=1)
+    stagnation_replan: int = Field(default=2, ge=1)
+    stagnation_stop: int = Field(default=4, ge=1)
+    cheap_experiment_seconds: float = Field(default=30.0, gt=0)
+    critic_on_stagnation: bool = True
+    target_score: float | None = Field(default=None, gt=0, le=1)
 
 
 class ProtocolSpec(StrictModel):
@@ -160,6 +196,8 @@ class ProtocolSpec(StrictModel):
     allowed_model_families: tuple[ModelFamily, ...] = Field(min_length=1)
     min_effect_floor: float = Field(default=0.002, gt=0, le=1)
     budgets: BudgetLimits
+    loop_policy: LoopPolicy = LoopPolicy()
+    sealed_holdout_sha256: str
     final_grader: Literal["local_holdout"] = "local_holdout"
 
     @model_validator(mode="after")
@@ -222,6 +260,8 @@ class TaskContract(StrictModel):
     allowed_model_families: tuple[ModelFamily, ...] = Field(min_length=1)
     decision_policy: DecisionPolicy
     budgets: BudgetLimits
+    loop_policy: LoopPolicy = LoopPolicy()
+    sealed_holdout_sha256: str
     memory_snapshot_hash: str
     allow_custom_features: Literal[False] = False
     final_grader: Literal["local_holdout"] = "local_holdout"

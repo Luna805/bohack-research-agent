@@ -81,18 +81,36 @@ class Budget:
             self.tail_reserve = reserve
             self._persist()
 
+    def _shortfalls(self, planned: ResourceVector) -> list[str]:
+        occupied = add_resources(self.used, self.reserved, self.unknown, self.tail_reserve)
+        failures = []
+        for field in RESOURCE_FIELDS:
+            limit = self._limit_for(field)
+            if limit is None:
+                continue
+            if getattr(occupied, field) + getattr(planned, field) > limit + 1e-12:
+                failures.append(field)
+        return failures
+
+    def can_reserve(self, planned: ResourceVector) -> bool:
+        """Dry-run check used by stop rules; it does not change any state."""
+        with self._lock:
+            return not self._shortfalls(planned)
+
+    def remaining(self) -> dict[str, float | int | None]:
+        with self._lock:
+            occupied = add_resources(self.used, self.reserved, self.unknown, self.tail_reserve)
+            result: dict[str, float | int | None] = {}
+            for field in RESOURCE_FIELDS:
+                limit = self._limit_for(field)
+                result[field] = None if limit is None else max(0, limit - getattr(occupied, field))
+            return result
+
     def reserve(self, action_id: str, planned: ResourceVector) -> dict[str, Any]:
         with self._lock:
             if action_id in self.reservations:
                 raise ValueError(f"action already has a reservation: {action_id}")
-            occupied = add_resources(self.used, self.reserved, self.unknown, self.tail_reserve)
-            failures = []
-            for field in RESOURCE_FIELDS:
-                limit = self._limit_for(field)
-                if limit is None:
-                    continue
-                if getattr(occupied, field) + getattr(planned, field) > limit + 1e-12:
-                    failures.append(field)
+            failures = self._shortfalls(planned)
             if failures:
                 raise BudgetExceeded(f"insufficient budget for {action_id}: {', '.join(failures)}")
             self.reserved = add_resources(self.reserved, planned)

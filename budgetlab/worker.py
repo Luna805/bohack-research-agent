@@ -9,7 +9,7 @@ import joblib
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
-from .data import load_dataset
+from .data import load_development
 from .ledger import atomic_write_json
 from .pipeline import build_pipeline, score_predictions
 from .schemas import ExperimentSpec, TaskContract
@@ -22,14 +22,17 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
     if payload.get("simulate_sleep_seconds"):
         time.sleep(float(payload["simulate_sleep_seconds"]))
     try:
-        bundle = load_dataset(str(payload["dataset_ref"]))
         spec = ExperimentSpec.model_validate(payload["spec"])
         contract = TaskContract.model_validate(payload["contract"])
+        bundle = load_development(contract.dataset_ref, Path(str(payload["data_root"])))
+        if bundle.dataset_hash != contract.dataset_hash:
+            raise ValueError("development data hash does not match the frozen contract")
+        features = bundle.features[list(contract.approved_feature_columns)]
         purpose = str(payload["purpose"])
         if purpose == "final_refit":
             fit_attempts = 1
-            pipeline = build_pipeline(spec, bundle.features, contract.search_training_seed)
-            pipeline.fit(bundle.features, bundle.target)
+            pipeline = build_pipeline(spec, features, contract.search_training_seed)
+            pipeline.fit(features, bundle.target)
             fit_completed = 1
             model_path = Path(str(payload["model_path"]))
             model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,21 +42,19 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
             seed = int(payload["split_seed"])
             splitter = StratifiedKFold(n_splits=contract.cv_folds, shuffle=True, random_state=seed)
             fold_scores = []
-            for fold_index, (train, valid) in enumerate(
-                splitter.split(bundle.features, bundle.target)
-            ):
+            for fold_index, (train, valid) in enumerate(splitter.split(features, bundle.target)):
                 pipeline = build_pipeline(
-                    spec, bundle.features.iloc[train], contract.search_training_seed + fold_index
+                    spec, features.iloc[train], contract.search_training_seed + fold_index
                 )
                 fit_attempts += 1
-                pipeline.fit(bundle.features.iloc[train], bundle.target.iloc[train])
+                pipeline.fit(features.iloc[train], bundle.target.iloc[train])
                 fit_completed += 1
                 fold_scores.append(
                     score_predictions(
                         contract.primary_metric,
                         bundle.target.iloc[valid],
                         pipeline,
-                        bundle.features.iloc[valid],
+                        features.iloc[valid],
                     )
                 )
         return {
