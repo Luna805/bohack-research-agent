@@ -119,6 +119,7 @@ def history_rows(runs_root: Path, runs: list[dict[str, Any]]) -> list[dict[str, 
         source = summary.get("proposal_source") or config.get("proposal_source")
         started = run_started(run["run_id"])
         score = summary.get("delivered_dev_score")
+        strategy = run_strategy(base)
         rows.append(
             {
                 "run_id": run["run_id"],
@@ -129,6 +130,8 @@ def history_rows(runs_root: Path, runs: list[dict[str, Any]]) -> list[dict[str, 
                 "finished": bool(run.get("finished")),
                 "score": f"{score:.4f}" if isinstance(score, int | float) else "",
                 "started": started,
+                "strategy": strategy["title"],
+                "strategy_detail": strategy["detail"],
             }
         )
     return sorted(
@@ -204,6 +207,84 @@ def describe_spec(spec: dict[str, Any]) -> str:
         actions.append(f"{label} {columns}".strip())
     text = " · ".join(parts)
     return text + (f"；{'；'.join(actions)}" if actions else "")
+
+
+ACTION_PHRASES = {
+    "sentinel_to_missing": "{cols} 哨兵值处理",
+    "missing_indicator": "{cols} 缺失标记",
+    "log1p": "{cols} 取对数",
+    "drop": "去掉 {cols}",
+    "drop_columns": "去掉 {cols}",
+}
+
+
+def _columns_text(columns: list[str]) -> str:
+    return "、".join(columns) if len(columns) <= 2 else f"{columns[0]} 等 {len(columns)} 列"
+
+
+def strategy_title(spec: dict[str, Any] | None) -> str:
+    """The key moves of a spec in a few words, e.g. ``平衡随机森林 + pdays 哨兵值处理``.
+
+    Model family first (``平衡`` when classes are reweighted), then each feature action.
+    A spec with neither reweighting nor feature actions names its tree settings instead,
+    so two tuned forests do not read the same.
+    """
+    if not spec:
+        return ""
+    model = spec.get("model") or {}
+    name = MODEL_NAMES.get(model.get("family"), model.get("family") or "模型")
+    balanced = model.get("class_weight") == "balanced"
+    phrases = []
+    actions = spec.get("feature_actions") or []
+    sentinel = {
+        str(column)
+        for action in actions
+        if action.get("kind") == "sentinel_to_missing"
+        for column in action.get("columns") or []
+    }
+    for action in actions:
+        kind = action.get("kind")
+        columns = [str(column) for column in action.get("columns") or []]
+        if kind == "missing_indicator":
+            # Flagging a column whose sentinel was just turned into missing is one move.
+            columns = [column for column in columns if column not in sentinel]
+            if not columns:
+                continue
+        template = ACTION_PHRASES.get(kind, "{cols} " + str(kind or "特征处理"))
+        phrases.append(template.format(cols=_columns_text(columns)).strip())
+    if not balanced and not phrases:
+        hints = []
+        if model.get("n_estimators"):
+            hints.append(f"{model['n_estimators']} 棵")
+        if model.get("max_depth"):
+            hints.append(f"深度 {model['max_depth']}")
+        if model.get("learning_rate"):
+            hints.append(f"学习率 {model['learning_rate']}")
+        return " · ".join([name, *hints])
+    return " + ".join([("平衡" if balanced else "") + name, *phrases])
+
+
+def run_strategy(base: Path) -> dict[str, str]:
+    """Title and detail for what a finished run delivered; empty strings while it has none."""
+    summary = read_json(base / "summary.json")
+    delivered = summary.get("delivered_experiment_id")
+    if not delivered:
+        return {"title": "", "detail": ""}
+    record = read_json(base / "experiments" / f"{delivered}.json")
+    spec = record.get("spec") or {}
+    if delivered == "baseline" or record.get("origin") == "baseline":
+        title = f"保留基线：{strategy_title(spec) or '基线模型'}"
+        if summary.get("exploration_best_id") not in (None, "baseline"):
+            title += "（候选提升不够显著）"
+    else:
+        title = strategy_title(spec) or str(delivered)
+    detail = f"交付 {delivered}：{describe_spec(spec)}" if spec else f"交付 {delivered}"
+    hypothesis = record.get("hypothesis")
+    if isinstance(hypothesis, dict):
+        hypothesis = hypothesis.get("statement")
+    if hypothesis:
+        detail += f"\n\n假设：{hypothesis}"
+    return {"title": title, "detail": detail}
 
 
 def _min_effect(base: Path) -> float | None:

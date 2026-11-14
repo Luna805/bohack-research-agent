@@ -7,11 +7,14 @@ from pathlib import Path
 import streamlit as st
 
 from budgetlab.ui.insights import (
+    branch_activity,
     branch_chart_spec,
     branch_tree,
     cycle_status,
+    experiment_label,
     experiment_rows,
     explain_experiment,
+    model_label,
     read_json,
     read_jsonl,
     score_chart_spec,
@@ -119,37 +122,72 @@ def render_result_panel(run_dir: Path | None) -> None:
         if deltas:
             st.caption("新切分复核差值：" + " / ".join(f"{value:+.3f}" for value in deltas))
     if evaluation:
-        st.metric("Holdout（仅一次）", f"{evaluation.get('holdout_score'):.3f}")
+        st.metric("最终测试分数", f"{evaluation.get('holdout_score'):.3f}")
     else:
-        st.caption("Holdout：尚未评测。")
+        state = read_json(run_dir / "ui_final_test.json")
+        if state.get("status") == "running":
+            st.caption("最终测试：正在独立测试集上检验模型……")
+        elif state.get("status") == "failed":
+            st.caption("最终测试：未完成，可在研究结论中查看原因。")
+        else:
+            st.caption("最终测试：尚未完成。独立测试集不参与训练或选模型。")
 
 
-def render_branch_map(run_dir: Path | None) -> None:
+def render_branch_map(run_dir: Path | None, *, running: bool | None = None) -> None:
     with st.popover("图例与操作"):
-        st.write("蓝色：最终交付；深灰：达到门槛；淡色：其他尝试。")
-        st.write("悬停节点看结果，下方选择实验可看完整依据。")
+        st.write("蓝色：正在执行 · 绿色菱形：最终采用 · 空心圆：对照步骤 · 灰色：未入选/其他候选。")
+        st.write("灰色不代表失败。先从有足够提升的候选中按开发分数挑选，再复核；通过后才最终采用。")
+        st.write("连线表示方案之间的对照关系，绿色上游节点并不是多个最终模型。")
+        st.write("节点末行是开发集分数（越高越好）；悬停或在下方选择方案，查看入选原因。")
     if run_dir is None:
         st.info("打开一条研究记录，或启动一次研究后查看分岔。")
         return
     summary = read_json(run_dir / "summary.json")
-    rows = experiment_rows(run_dir, summary)
-    tree = branch_tree(rows, summary.get("delivered_experiment_id"))
+    events = read_jsonl(run_dir / "events.jsonl")
+    rows = experiment_rows(run_dir, summary, events)
+    active_id, active_label = branch_activity(
+        run_dir, events, rows, finished=bool(summary), running=running
+    )
+    tree = branch_tree(
+        rows, summary.get("delivered_experiment_id"), active_id, active_label, summary=summary
+    )
     if tree is None:
         st.info("当前还没有可展示的实验，运行开始后会出现分岔。")
         return
+    if active_id:
+        active_row = next(row for row in rows if row["id"] == active_id)
+        st.caption(f"🔵 {active_label} · {experiment_label(active_row)} · 路线每 2 秒更新")
+    elif summary:
+        st.caption("研究已结束 · 绿色菱形为最终采用方案，绿色空心圆为其对照步骤")
+    elif running is False or any(event.get("event_type") == "run_failed" for event in events):
+        st.caption("研究已停止 · 执行高亮已熄灭")
+    else:
+        st.caption(active_label or "当前没有执行中的实验 · 等待下一步")
     st.echarts_chart(
         branch_chart_spec(tree),
         height=540,
-        alt="研究实验分岔，蓝色节点为交付方案，深灰节点为通过门槛的方案",
+        key=f"branch-map-{run_dir.name}",
+        alt="研究路径：蓝色为当前执行，绿色菱形为最终采用，空心圆为对照步骤，灰色为未入选方案",
     )
     chosen = st.selectbox(
         "查看节点说明",
         [row["id"] for row in rows],
-        format_func=lambda experiment_id: f"实验 {experiment_id}",
+        format_func=lambda experiment_id: next(
+            f"{experiment_label(row)} · {model_label(row)}"
+            for row in rows
+            if row["id"] == experiment_id
+        ),
         key=f"branch-detail-{run_dir.name}",
     )
     row = next(row for row in rows if row["id"] == chosen)
-    st.info(explain_experiment(row, summary.get("delivered_experiment_id")))
-    if row.get("hypothesis"):
-        with st.expander("查看原始假设"):
-            st.write(row["hypothesis"])
+    st.info(
+        explain_experiment(row, summary.get("delivered_experiment_id"), rows=rows, summary=summary)
+    )
+    with st.expander("技术信息与原始依据"):
+        st.caption(
+            f"内部编号：{row['id']}"
+            + (f" · 对照编号：{row['parent']}" if row.get("parent") else "")
+        )
+        st.caption("r 表示研究轮次，c 表示该轮实际执行的方案顺序；编号仅用于追溯原始记录。")
+        if row.get("hypothesis"):
+            st.write(f"原始假设：{row['hypothesis']}")

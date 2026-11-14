@@ -11,7 +11,9 @@ from budgetlab.ui.workbench import (
     progress,
     project_groups,
     round_started_at,
+    run_strategy,
     sort_entries,
+    strategy_title,
     when_text,
 )
 
@@ -150,3 +152,40 @@ def test_project_groups_nest_runs_under_their_task():
     assert when_text(None, now) == ""
     assert ":" in when_text(datetime(2026, 11, 14, 11, 30, tzinfo=UTC), now)
     assert when_text(datetime(2026, 11, 1, 12, tzinfo=UTC), now) == "11月1日"
+
+
+def test_strategy_title_names_the_delivered_moves(tmp_path):
+    forest = {
+        "model": {"family": "random_forest", "class_weight": "balanced", "n_estimators": 300},
+        "feature_actions": [
+            {"kind": "sentinel_to_missing", "columns": ["pdays"], "value": 999},
+            {"kind": "missing_indicator", "columns": ["pdays"]},
+            {"kind": "log1p", "columns": ["campaign", "previous"]},
+        ],
+    }
+    assert strategy_title(forest) == "平衡随机森林 + pdays 哨兵值处理 + campaign、previous 取对数"
+    tuned = {"model": {"family": "hist_gradient_boosting", "learning_rate": 0.05}}
+    assert strategy_title(tuned) == "梯度提升树 · 学习率 0.05"
+    wide = {
+        "model": {"family": "logistic_regression"},
+        "feature_actions": [{"kind": "drop", "columns": ["a", "b", "c"]}],
+    }
+    assert strategy_title(wide) == "逻辑回归 + 去掉 a 等 3 列"
+
+    base = tmp_path / "run"
+    (base / "experiments").mkdir(parents=True)
+    assert run_strategy(base) == {"title": "", "detail": ""}  # still running: nothing delivered
+    (base / "summary.json").write_text(
+        json.dumps({"delivered_experiment_id": "baseline", "exploration_best_id": "r02-c2"})
+    )
+    (base / "experiments" / "baseline.json").write_text(
+        json.dumps({"origin": "baseline", "spec": {"model": {"family": "logistic_regression"}}})
+    )
+    assert run_strategy(base)["title"] == "保留基线：逻辑回归（候选提升不够显著）"
+    (base / "summary.json").write_text(json.dumps({"delivered_experiment_id": "r05-c1"}))
+    (base / "experiments" / "r05-c1.json").write_text(
+        json.dumps({"origin": "proposer", "spec": forest, "hypothesis": "Flag pdays."})
+    )
+    strategy = run_strategy(base)
+    assert strategy["title"].startswith("平衡随机森林")
+    assert "交付 r05-c1" in strategy["detail"] and "假设：Flag pdays." in strategy["detail"]

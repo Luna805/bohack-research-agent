@@ -1,7 +1,8 @@
 """Workbench page for one BudgetLab research: chat on the left, run files on the right.
 
 Start with ``streamlit run budgetlab/ui/app.py`` from the repository root. The page only reads
-run artifacts (and starts runs or the one-shot holdout through the CLI); numbers and verdicts
+run artifacts (and starts runs, each followed by its one-time final test, in the background);
+numbers and verdicts
 come from the program, never from the page.
 """
 
@@ -43,7 +44,7 @@ from budgetlab.ui.artifacts import (
     resolve_artifact,
     run_dir,
 )
-from budgetlab.ui.insights import read_json, token_ledger
+from budgetlab.ui.insights import experiment_label, experiment_rows, read_json, token_ledger
 from budgetlab.ui.llm import llm_overrides, llm_problem, llm_settings, log_call, research_config
 from budgetlab.ui.presentation import artifact_preview, load_matrix, trajectory_rows
 from budgetlab.ui.workbench import (
@@ -56,6 +57,7 @@ from budgetlab.ui.workbench import (
     progress,
     project_groups,
     round_started_at,
+    run_strategy,
     size_text,
     sort_entries,
     when_text,
@@ -86,12 +88,12 @@ def fmt(value: object, digits: int = 4) -> str:
     return f"{value:.{digits}f}" if isinstance(value, int | float) else "—"
 
 
-def holdout_text(evaluation: dict) -> str:
-    text = f"Holdout：{fmt(evaluation.get('holdout_score'))}"
+def final_test_text(evaluation: dict) -> str:
+    text = f"独立测试集分数：{fmt(evaluation.get('holdout_score'))}"
     interval = evaluation.get("holdout_ci95")
     if interval and len(interval) == 2:
         text += f"（95% 区间 {fmt(interval[0])}–{fmt(interval[1])}）"
-    return text + "，已评测"
+    return text + "，最终测试已完成"
 
 
 def read_events(run_dir: Path) -> list[dict]:
@@ -130,8 +132,7 @@ def launch(task_id: str, config_path: Path) -> dict:
     command = [
         sys.executable,
         "-m",
-        "budgetlab.cli",
-        "research",
+        "budgetlab.ui.research_job",
         "--config",
         str(config_path),
         "--system",
@@ -154,6 +155,7 @@ def launch(task_id: str, config_path: Path) -> dict:
         "run_id": None,
         "task_id": task_id,
         "proposer": "llm",
+        "auto_final_test": True,
     }
 
 
@@ -173,14 +175,13 @@ def locate_run(job: dict) -> Path | None:
 
 
 def evaluate_run(run_id: str) -> str | None:
-    """Run the explicit, one-shot holdout command and return a user-facing error."""
+    """Run the one-time final test of a frozen model; return a user-facing error."""
     result = subprocess.run(
         [
             sys.executable,
             "-m",
-            "budgetlab.cli",
-            "evaluate",
-            "--run-id",
+            "budgetlab.ui.research_job",
+            "--evaluate-run-id",
             run_id,
             "--runs-root",
             str(RUNS),
@@ -193,10 +194,68 @@ def evaluate_run(run_id: str) -> str | None:
     return result.stderr[-1000:] if result.returncode else None
 
 
+def own_job(run_id: str) -> dict | None:
+    """The page's background job when it is the one that produced ``run_id``."""
+    job = st.session_state.get("job")
+    job_dir = locate_run(job) if job else None
+    return job if job_dir is not None and job_dir.name == run_id else None
+
+
+def final_test_pending(run_id: str) -> bool:
+    """True while the background job is still testing the frozen model."""
+    if STORE.get_final_evaluation(run_id):
+        return False
+    job = own_job(run_id)
+    if job and job.get("auto_final_test") and job["process"].poll() is None:
+        return True
+    return read_json(RUNS / run_id / "ui_final_test.json").get("status") == "running"
+
+
+def show_final_test(run_id: str, *, key: str) -> None:
+    """Explain the final check; only legacy runs and failures need a manual action."""
+    job = own_job(run_id)
+    st.markdown("**最终测试**")
+    st.caption(
+        "用训练和选模型时未使用的独立测试集，检验最终模型对新样本的表现。"
+        "每次研究仅测试一次，结果不再用于调参。"
+    )
+    evaluation = STORE.get_final_evaluation(run_id)
+    state = read_json(RUNS / run_id / "ui_final_test.json")
+    status = "completed" if evaluation else state.get("status")
+    if job and job.get("auto_final_test") and status in {"completed", "failed"}:
+        if job.get("final_test_seen") != status:
+            job["final_test_seen"] = status
+            st.rerun()
+    if evaluation:
+        st.write(final_test_text(evaluation))
+        return
+    process_running = job is not None and job["process"].poll() is None
+    if (job and job.get("auto_final_test") and process_running) or (
+        status == "running" and job is None
+    ):
+        st.info("模型已确定，正在自动完成最终测试……")
+        return
+    interrupted = status in {"running", "failed"} or (job and job.get("auto_final_test"))
+    if interrupted:
+        st.warning("模型研究已完成，但最终测试尚未完成。可在下方查看原因并重试。")
+    else:
+        st.info("这条旧研究记录尚未进行最终测试。新启动的研究会自动完成这一步。")
+    with st.expander("查看原因与重试" if interrupted else "补充这条旧记录的最终测试"):
+        if state.get("error"):
+            st.error(state["error"])
+        st.caption("仅测试已经确定的模型，不会重新训练或修改研究方案。")
+        if st.button("重试最终测试" if interrupted else "测试已确定的模型", key=key):
+            with st.spinner("正在测试最终模型……"):
+                error = evaluate_run(run_id)
+            if error:
+                st.error(error)
+            else:
+                st.rerun()
+
+
 def reset_task_draft() -> None:
     for key in (
         "request",
-        "protocol_confirmed",
         "upload",
         "custom_task",
         "upload-target",
@@ -301,7 +360,7 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
         if draft is not None:
             st.info(
                 f"下表预填了协议 Agent 的草稿（LLM，{draft['tokens']:,} Token）。"
-                "它只看了开发数据的字段画像，没有看 holdout。请逐列核对后再确认。"
+                "它只看了开发数据的字段画像，没有看独立测试集。请逐列核对后再确认。"
             )
             if draft["target_column"] != target_column:
                 st.warning(f"Agent 认为目标列是 {draft['target_column']}，请核对。")
@@ -403,7 +462,6 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
             )
             st.session_state["custom_task"] = (task_id, str(config_path))
             st.session_state.pop("upload", None)
-            st.session_state["protocol_confirmed"] = True
             st.rerun()
 
 
@@ -888,29 +946,31 @@ def show_conclusion(run_id: str) -> None:
                 border=True,
             )
             st.metric(
-                "Holdout · 只评一次",
-                fmt(evaluation.get("holdout_score")) if evaluation else "未评测",
+                "最终测试 · 只测一次",
+                fmt(evaluation.get("holdout_score"))
+                if evaluation
+                else ("进行中" if final_test_pending(run_id) else "未完成"),
                 border=True,
             )
             st.metric("新切分复核", summary.get("confirmation_status", "未知"), border=True)
             st.metric("LLM Token", f"{int(llm.get('tokens') or 0):,}", border=True)
         delivered = summary.get("delivered_experiment_id")
         detail = read_json(RUNS / run_id / "experiments" / f"{delivered}.json") if delivered else {}
-        lines = (
-            [f"交付 {delivered}：{describe_spec(detail.get('spec') or {})}"] if delivered else []
+        delivered_row = next(
+            (row for row in experiment_rows(RUNS / run_id, summary) if row["id"] == delivered),
+            {"id": delivered or ""},
         )
+        spec_text = describe_spec(detail.get("spec") or {})
+        lines = [f"交付「{experiment_label(delivered_row)}」：{spec_text}"] if delivered else []
         if evaluation:
-            lines.append(holdout_text(evaluation))
+            lines.append(final_test_text(evaluation))
         lines.append(
             f"LLM {llm.get('requests', 0)} 次请求 · 用时 {clock(summary.get('wall_seconds'))} · "
             f"代码版本 {summary.get('code_version')}"
         )
         st.caption("  \n".join(lines))
-        if not evaluation and st.button("运行一次 holdout 评测", key=f"evaluate-{run_id}"):
-            if error := evaluate_run(run_id):
-                st.error(error)
-            else:
-                st.rerun()
+        if not evaluation:
+            live(show_final_test, final_test_pending(run_id))(run_id, key=f"evaluate-{run_id}")
         st.caption(
             "数值来自 summary.json 和 final_evaluation.json；是否通过由程序判断，不由 LLM 判断。"
         )
@@ -935,7 +995,7 @@ def show_starting() -> None:
 
 def show_empty_state() -> None:
     st.markdown("## 接下来想研究什么？")
-    st.caption("在下方描述要预测什么，可以附上一份二分类 CSV。先确认研究方案，再开始研究。")
+    st.caption("在下方描述要预测什么，可以附上一份二分类 CSV。示例任务自动采用已有任务说明。")
     st.markdown("**从示例开始**")
     cards = [(name, text) for name, text in EXAMPLES.items()]
     grid = st.columns(2)
@@ -975,7 +1035,7 @@ def show_empty_state() -> None:
 
 
 def show_setup_flow() -> None:
-    """Confirm the research plan (example card or uploaded CSV) and start the run."""
+    """Show the research plan (example card or saved CSV protocol) and start the run."""
     with st.chat_message("user"):
         st.write(st.session_state["request"])
 
@@ -987,9 +1047,9 @@ def show_setup_flow() -> None:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     with st.chat_message("assistant"):
         if task_id.startswith("upload-"):
-            st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
+            st.write("以下是已保存的 CSV 任务说明，研究将使用这些设置。")
         else:
-            st.write("请确认研究方案。以下是该示例的任务说明。")
+            st.write("已采用该示例的任务说明，可直接准备数据并开始研究。")
         st.write(f"**任务：** {card['title']}")
         st.write(f"**预测时点：** {card['prediction_time']}")
         st.write(
@@ -1025,9 +1085,6 @@ def show_setup_flow() -> None:
                 st.write("这个示例的所有数据列都可以用来预测。")
             else:
                 st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
-        confirmed = st.checkbox(
-            "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
-        )
 
     with st.chat_message("assistant"):
         run_config = research_config(config, ROOT)
@@ -1040,12 +1097,13 @@ def show_setup_flow() -> None:
         st.write(
             f"**研究预算：** 最多 {budget['max_experiments']} 次实验；系统 `budgetlab`，{source}。"
         )
+        st.caption("开始后自动完成模型研究和独立测试集上的最终测试。")
         if LLM_PROBLEM is not None:
             st.error(f"{LLM_PROBLEM}。实验方案只由 LLM 提出，配置好之后才能开始研究。")
         ready = (DATA / "prepared" / task_id / "development.csv").is_file()
         if not ready:
             st.warning("当前任务数据尚未准备，Bank 和 Adult 首次准备需要下载数据。")
-            if st.button("准备示例数据", disabled=not confirmed):
+            if st.button("准备示例数据"):
                 result = subprocess.run(
                     [
                         sys.executable,
@@ -1068,7 +1126,7 @@ def show_setup_flow() -> None:
                     st.rerun()
         if st.button(
             "开始研究",
-            disabled=not confirmed or not ready or not llm_on or bool(st.session_state.get("job")),
+            disabled=not ready or not llm_on or bool(st.session_state.get("job")),
         ):
             st.session_state["job"] = launch(task_id, config_path)
             st.session_state["view_run"] = None
@@ -1104,7 +1162,7 @@ def show_compare() -> None:
         st.dataframe(
             [{key: row.get(key) for key in columns} for row in rows],
             hide_index=True,
-            alt="各研究系统的开发集、holdout 分数和运行成本对比",
+            alt="各研究系统的开发集、独立测试集分数和运行成本对比",
         )
         run_options = [row["run_id"] for row in valid if row.get("run_id")]
         if run_options:
@@ -1324,7 +1382,7 @@ def show_workspace(run_id: str | None, running: bool, highlight: set[str], tall:
             elif tab == "查看器":
                 show_viewer()
             elif tab == "研究路径":
-                live(render_branch_map, running)(RUNS / run_id)
+                live(render_branch_map, running)(RUNS / run_id, running=running)
             else:
                 show_score_curve(run_id, curve_summary(RUNS / run_id))
 
@@ -1431,7 +1489,7 @@ def show_validation(run_id: str) -> None:
     base = RUNS / run_id
     summary = read_json(base / "summary.json")
     if not summary:
-        st.info("研究结束后，这里显示新切分复核和 holdout 结果。")
+        st.info("研究结束后，这里显示新切分复核和最终测试结果。")
         return
     evaluation = STORE.get_final_evaluation(run_id)
     left, right = st.columns(2)
@@ -1453,22 +1511,23 @@ def show_validation(run_id: str) -> None:
             )
         st.caption(f"门槛：每次都要高于最小提升 {effect_text(policy.get('min_effect'))}")
     with right:
-        st.markdown("**Holdout** · 只能评一次")
+        st.markdown("**最终测试** · 每次研究只测一次")
         if evaluation:
-            st.metric("holdout 分数", fmt(evaluation.get("holdout_score")))
+            st.metric("最终测试分数", fmt(evaluation.get("holdout_score")))
             interval = evaluation.get("holdout_ci95") or []
             if len(interval) == 2:
                 st.caption(f"95% 区间 {fmt(interval[0])}–{fmt(interval[1])}")
             st.caption(
-                f"封存数据 {evaluation.get('holdout_rows', '—'):,} 行 · 开发集 "
+                f"独立测试集 {evaluation.get('holdout_rows', '—'):,} 行 · 开发集 "
                 f"{fmt(evaluation.get('development_cv_score'))}，差 "
                 f"{fmt(evaluation.get('dev_minus_holdout'))}"
             )
-        elif st.button("运行一次 holdout 评测", key=f"panel-evaluate-{run_id}"):
-            if error := evaluate_run(run_id):
-                st.error(error)
-            else:
-                st.rerun()
+        elif final_test_pending(run_id):
+            st.caption("正在独立测试集上检验模型……")
+        elif read_json(base / "ui_final_test.json").get("status") == "failed":
+            st.caption("未完成，可在研究结论中查看原因并重试。")
+        else:
+            st.caption("尚未完成。独立测试集不参与训练或选模型。")
 
 
 def show_compare_compact() -> None:
@@ -1574,7 +1633,7 @@ def show_drawer(focus: str | None, busy: bool, running_id: str | None) -> None:
         names = project_names()
         groups = project_groups(history_rows(RUNS, STORE.list_runs()), names)
         if query:
-            fields = ("title", "task_id", "system", "run_id", "source")
+            fields = ("title", "strategy", "task_id", "system", "run_id", "source")
             for group in groups:
                 if query not in group["name"].lower() and query not in group["task_id"].lower():
                     group["runs"] = [
@@ -1631,25 +1690,29 @@ def show_drawer(focus: str | None, busy: bool, running_id: str | None) -> None:
                         st.caption("还没有研究，点 + 开始")
                     for row in runs:
                         row_running = row["run_id"] == running_id
+                        # The title names the delivered strategy; source and score go below.
                         if row_running:
-                            status = "运行中"
-                        elif row["score"]:
-                            status = row["score"]
+                            title, status = "研究进行中…", "运行中"
                         else:
-                            status = "已完成" if row["finished"] else "未完成"
+                            title = row["strategy"] or (
+                                "已完成" if row["finished"] else "已中断，没有交付"
+                            )
+                            status = row["score"] or ("已完成" if row["finished"] else "未完成")
+                        meta = [row["source"], status, when_text(row["started"], now)]
+                        detail = row["strategy_detail"] or str(row["system"] or "")
                         key = "on-" if row["run_id"] == focus else ""
                         with st.container(key=f"hrow-{key}{row['run_id']}", gap=None):
                             st.button(
-                                f"{row['source']} · {status}",
+                                title,
                                 key=f"open-{row['run_id']}",
                                 icon=":material/progress_activity:" if row_running else None,
                                 type="tertiary",
-                                help=f"{row['system']} · {row['run_id']}",
+                                help=f"{detail}\n\n`{row['run_id']}`",
                                 on_click=open_run,
                                 args=(row["run_id"],),
                                 width="stretch",
                             )
-                            st.caption(when_text(row["started"], now))
+                            st.caption(" · ".join(part for part in meta if part))
             if not groups:
                 st.caption("没有匹配的项目或研究记录。")
         st.button(
@@ -1730,19 +1793,22 @@ st.html("""<style>
   background: linear-gradient(#E4E7EC, #E4E7EC) no-repeat left .78rem top 0 / 1px 100%;
 }
 [class*="st-key-projruns-"] > [data-testid="stElementContainer"] p {margin: .1rem .5rem;}
-[class*="st-key-hrow-"] {position: relative;}
-[class*="st-key-hrow-"] button {
-  width: 100%; padding: .2rem 3.6rem .2rem .5rem; border-radius: 6px; color: #344054;
+/* A run row: strategy title (up to two lines) over a small source · score · time line. */
+[class*="st-key-hrow-"] {position: relative; border-radius: 6px; padding: .25rem 0 .3rem;}
+[class*="st-key-hrow-"]:hover {background: #F2F4F7;}
+[class*="st-key-hrow-on-"], [class*="st-key-hrow-on-"]:hover {background: #EEF3FF;}
+[class*="st-key-hrow-"] button {width: 100%; padding: 0 .5rem; color: #344054;}
+[class*="st-key-hrow-"] button:hover {background: transparent;}
+[class*="st-key-hrow-on-"] button {color: #1D4ED8;}
+[class*="st-key-hrow-"] button p {
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; line-height: 1.35;
 }
-[class*="st-key-hrow-"] button:hover {background: #F2F4F7;}
-[class*="st-key-hrow-on-"] button, [class*="st-key-hrow-on-"] button:hover {
-  background: #EEF3FF; color: #1D4ED8;
+/* The whole row, caption included, opens the run. */
+[class*="st-key-hrow-"] button::after {content: ""; position: absolute; inset: 0;}
+[class*="st-key-hrow-"] [data-testid="stCaptionContainer"] p {
+  margin: .05rem .5rem 0; font-size: .75rem;
 }
-[class*="st-key-hrow-"] [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"]) {
-  position: absolute; right: .5rem; top: 0; bottom: 0; height: auto !important;
-  width: auto !important; display: flex; align-items: center; pointer-events: none;
-}
-[class*="st-key-hrow-"] [data-testid="stCaptionContainer"] p {margin: 0;}
 .st-key-chat_head {flex-wrap: nowrap !important;}
 .st-key-chat_head [data-testid="stElementContainer"]:has([data-testid="stMarkdown"]) {
   min-width: 0; flex: 0 1 auto;
@@ -1763,7 +1829,15 @@ if "ws_tab_next" in st.session_state:
 
 job = st.session_state.get("job")
 job_dir = locate_run(job) if job else None
-job_done = bool(job_dir and (job_dir / "summary.json").is_file())
+job_done = bool(
+    job_dir
+    and (job_dir / "summary.json").is_file()
+    and (
+        not job.get("auto_final_test")
+        or (job_dir / "final_evaluation.json").is_file()
+        or read_json(job_dir / "ui_final_test.json").get("status") == "failed"
+    )
+)
 busy = bool(job and not job_done and job["process"].poll() is None)
 view_run = st.session_state.get("view_run")
 if view_run and run_dir(RUNS, view_run) is None:
@@ -1859,6 +1933,10 @@ elif focus:
     card = read_json(RUNS / focus / "scenario_card.json")
     own = bool(job_dir and focus == job_dir.name)
     title = card.get("title") or (st.session_state.get("request") if own else None) or focus
+    strategy = run_strategy(RUNS / focus)["title"]
+    if strategy:
+        task = read_json(RUNS / focus / "summary.json").get("task_id")
+        title = f"{project_names().get(task) or title} · {strategy}"
     badge = (
         ("运行中", "blue")
         if running

@@ -71,24 +71,34 @@ reasons, trigger source), `experiments/<id>.json` (spec, result, all verdicts, l
 
 Install the optional UI dependencies with `uv sync --frozen --extra dev --extra llm --extra ui`,
 then run `uv run streamlit run budgetlab/ui/app.py`. Choose Bank Marketing or Adult Income,
-confirm its protocol card, prepare the data, and start research. Bank and Adult preparation
-download public data on first use. Experiment proposals always come from the LLM configured in
-`.env`; without it the page can only browse earlier runs.
+prepare the data, and start research. Built-in tasks use their existing protocol cards
+automatically; the settings stay visible without a separate confirmation checkbox. Bank and
+Adult preparation download public data on first use. Experiment proposals always come from the
+LLM configured in `.env`; without it the page can only browse earlier runs.
 You can also attach a binary-classification CSV in the chat, select its target and positive
 class, and confirm each field's availability before preparing a local task. Every score
-is read from the run artifacts. Holdout scoring requires a separate button and can run once.
+is read from the run artifacts. New page runs automatically test the frozen model once on
+an independent holdout in the same background job, then show the result as **最终测试**.
+Refreshing the page only reads the saved result. Older unevaluated records have an explained,
+optional final-test action inside an expander; failed final tests offer an explicit retry.
 The page is a workbench: the conversation is on the left and the run's workspace on the right.
 For a quick demonstration, click one of the example cards; **新研究** clears the page state
 without deleting saved evidence. The ☰ button opens the research history, which can reopen any
 local run after a browser refresh, including one without a final summary. The workspace has
 four tabs: the run's files (files written in the current round are green), a read-only viewer,
-the research path (experiment branch map) and the score curve. Files cited under an answer open
-in the viewer with one click. The panel at the bottom right shows every experiment with its
-program verdict, the recorded LLM tokens (unknown usage stays separate) and the confirmation
-and holdout results. While a run is active, its progress card, file list, branch map and
-experiment table refresh every two seconds. **系统对比** in the history drawer reads the newest
-`results/final-*` matrix, or labels `results/dev-*` as development data when no formal matrix
-is available.
+the research path (experiment branch map) and the score curve. In the research path, the
+active experiment and its ancestor path light up blue, following recorded execution changes
+every two seconds; other branches dim. Completed runs highlight the final delivered path in
+green. Nodes use readable round/scheme names and show their development scores. Only the
+filled green diamond is the delivered model; outlined ancestors are comparison steps. Candidate
+details explain why an improved scheme was not selected, using recorded scores and
+confirmation results; technical IDs stay in the expandable evidence details. Files cited under
+an answer open in the viewer with one click. The panel at the bottom right shows every
+experiment with its program verdict, the recorded LLM tokens (unknown usage stays separate) and
+the confirmation and final-test results. While a run is active, its progress card, file list,
+branch map and experiment table refresh every two seconds. **系统对比** in the history drawer
+reads the newest `results/final-*` matrix, or labels `results/dev-*` as development data when
+no formal matrix is available.
 For a repeatable upload demo, attach `examples/student_risk/student_risk.csv` and use the
 explicit **载入演示协议（人工标准答案）** button. Review the excluded `G1`, `G2`, `G3` and
 `absences` fields before confirming; this card was written by a person, not inferred by an LLM.
