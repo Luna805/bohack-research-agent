@@ -12,6 +12,7 @@ def test_quick_answer_uses_saved_summary(tmp_path):
     runs = tmp_path / "runs"
     run = runs / "demo"
     run.mkdir(parents=True)
+    (run / "events.jsonl").write_text("", encoding="utf-8")
     (run / "summary.json").write_text(
         json.dumps(
             {
@@ -37,3 +38,20 @@ def test_evidence_rejects_path_traversal(tmp_path):
         store.get_summary("../other")
     with pytest.raises(ValueError, match="Invalid experiment ID"):
         store.get_experiment("safe", "../other")
+
+
+def test_incomplete_run_remains_visible(tmp_path):
+    runs = tmp_path / "runs"
+    run = runs / "unfinished"
+    run.mkdir(parents=True)
+    (run / "events.jsonl").write_text('{"event_type":"run_created"}\n', encoding="utf-8")
+    (run / "run_config.json").write_text('{"system":"budgetlab"}', encoding="utf-8")
+    rows = EvidenceStore(runs, tmp_path / "results").list_runs()
+    assert rows == [
+        {
+            "run_id": "unfinished",
+            "system": "budgetlab",
+            "task_id": None,
+            "finished": False,
+        }
+    ]

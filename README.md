@@ -70,15 +70,25 @@ reasons, trigger source), `experiments/<id>.json` (spec, result, all verdicts, l
 ## Chat research page (offline demonstration)
 
 Install the optional UI dependencies with `uv sync --frozen --extra dev --extra llm --extra ui`,
-then run `uv run streamlit run budgetlab/ui/app.py`. Describe a task, choose the built-in
-Breast Cancer smoke task for an offline run, confirm its protocol card, prepare the data,
-and start research. The Bank Marketing task uses the same flow but preparation downloads
-the UCI dataset. The page labels scripted proposals as **not using an LLM**. Every score
+then run `uv run streamlit run budgetlab/ui/app.py`. Choose Bank Marketing, Adult Income,
+or the offline Breast Cancer smoke task, confirm its protocol card, prepare the data,
+and start research. Bank and Adult preparation download public data on first use.
+You can also attach a binary-classification CSV in the chat, select its target and positive
+class, and confirm each field's availability before preparing a local task. The page labels
+scripted proposals as **not using an LLM**. Every score
 is read from the run artifacts. Holdout scoring requires a separate button and can run once.
+For a quick demonstration, select an example and click **用所选示例开始**. After a run finishes,
+click **开始另一个任务** to clear the page state without deleting the saved evidence.
+The sidebar can reopen a local run after a browser refresh, including one without a final
+summary. While a new run is active, step cards update automatically every two seconds. The system comparison
+view reads the newest `results/final-*` matrix, or labels `results/dev-*` as development data
+when no formal matrix is available.
+For a repeatable upload demo, attach `examples/student_risk/student_risk.csv` and use the
+explicit **载入演示协议（人工标准答案）** button. Review the excluded `G1`, `G2`, `G3` and
+`absences` fields before confirming; this card was written by a person, not inferred by an LLM.
 
-This first D slice uses existing scenario cards. Free-form protocol drafting, arbitrary CSV
-uploads, and open-ended QA depend on the A and C interfaces documented in
-`docs/INTERFACES.md`.
+Free-form protocol drafting and open-ended QA depend on A's agent interfaces in
+`docs/INTERFACES.md`. The no-LLM path uses human-confirmed cards and zero-token quick answers.
 
 ## Tests
 
@@ -93,5 +103,7 @@ Done: deterministic engine, Bank Marketing task + sealed holdout, multi-round lo
 candidates, dedup, stop rules, tool-search scheduling, direction attribution, metered
 PydanticAI proposer/critic (tested with a local FunctionModel), one-shot holdout evaluation.
 
-Not yet: a real hosted-model run, MLE-bench/Kaggle tasks, benchmark matrix runner, UI,
-lesson bank. Training runs in child processes with timeouts; this is not an OS sandbox.
+Also available: the benchmark matrix runner, Adult task, chat research page, and development
+comparison data. Not yet verified: a real hosted-model run, free-form protocol agent,
+open-ended QA agent, formal matrix results, or lesson bank. Training runs in child
+processes with timeouts; this is not an OS sandbox.
