@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -47,6 +48,7 @@ from budgetlab.ui.artifacts import (
 from budgetlab.ui.insights import experiment_label, experiment_rows, read_json, token_ledger
 from budgetlab.ui.llm import llm_overrides, llm_problem, llm_settings, log_call, research_config
 from budgetlab.ui.presentation import artifact_preview, load_matrix, trajectory_rows
+from budgetlab.ui.row_table import row_table
 from budgetlab.ui.workbench import (
     MODEL_NAMES,
     clock,
@@ -731,6 +733,15 @@ def effect_text(value: object) -> str:
     return f"{value:.4g}" if isinstance(value, int | float) else "—"
 
 
+def number_text(value: object, pattern: str) -> str:
+    """Table cell for a number that may be missing, text or NaN; anything unusable shows —."""
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "—"
+    return format(number, pattern) if math.isfinite(number) else "—"
+
+
 def local_time(seconds: float | None, pattern: str = "%H:%M:%S") -> str:
     return datetime.fromtimestamp(seconds).strftime(pattern) if seconds else ""
 
@@ -1252,62 +1263,52 @@ def show_files(run_id: str, running: bool, highlight: set[str]) -> None:
     if count:
         reason = "本轮新写入" if running else "最近一次回答引用"
         st.markdown(f":green-background[● 绿色标出的是{reason}的文件（共 {count} 个）]")
-    frame = pd.DataFrame(
+    row_table(
+        [
+            {"label": "名称", "width": "50%"},
+            {"label": "大小", "width": "20%"},
+            {"label": "时间", "width": "30%"},
+        ],
         [
             {
-                "名称": entry["name"],
-                "大小": f"{entry['items']} 项" if entry["is_dir"] else size_text(entry["size"]),
-                "时间": local_time(entry["mtime"], "%m-%d %H:%M:%S"),
+                "id": entry["path"],
+                "open": entry["path"],
+                "cells": [
+                    entry["name"],
+                    f"{entry['items']} 项" if entry["is_dir"] else size_text(entry["size"]),
+                    local_time(entry["mtime"], "%m-%d %H:%M:%S"),
+                ],
+                "tones": ["green-strong"] * 3 if fresh(entry) else None,
             }
             for entry in rows
         ],
-        columns=["名称", "大小", "时间"],
-    )
-    marks = [fresh(entry) for entry in rows]
-    styler = frame.style.apply(
-        lambda row: (
-            [
-                "background-color: #ECFDF3; color: #05603A; font-weight: 600"
-                if marks[row.name]
-                else ""
-            ]
-            * len(row)
-        ),
-        axis=1,
-    )
-    widget = f"files-{run_id}-{folder}-{st.session_state.get('files_nonce', 0)}"
-    st.dataframe(
-        styler,
-        key=widget,
-        hide_index=True,
-        on_select=partial(pick_file, run_id, widget, rows),
-        selection_mode="single-row",
-        height=min(36 * (len(rows) + 1) + 4, 520),
+        key=f"files-{run_id}",
+        on_open=partial(open_entry, run_id, {entry["path"]: entry for entry in rows}),
+        empty="没有匹配的文件",
+        fit=True,
     )
     dirs = sum(entry["is_dir"] for entry in entries)
-    st.caption(f"{dirs} 个文件夹 · {len(entries) - dirs} 个文件 · 点一行打开")
+    st.caption(f"{dirs} 个文件夹 · {len(entries) - dirs} 个文件 · 双击打开")
     rerun_if_asked()
 
 
-def pick_file(run_id: str, widget: str, rows: list[dict]) -> None:
-    selection = st.session_state.get(widget)
-    picked = selection.selection.rows if selection else []
-    if not picked:
+def open_entry(run_id: str, entries: dict[str, dict], path: str) -> None:
+    entry = entries.get(path)
+    if entry is None:
         return
-    entry = rows[picked[0]]
-    st.session_state["files_nonce"] = st.session_state.get("files_nonce", 0) + 1
     if entry["is_dir"]:
         set_folder(run_id, entry["path"])
     elif entry["viewable"]:
         open_file(run_id, entry["path"])
     else:
         st.session_state["files_notice"] = f"{entry['path']} 不是文本文件，不在页面里打开。"
+        st.session_state["need_rerun"] = True  # the notice sits outside the file-list fragment
 
 
 def show_viewer() -> None:
     current = st.session_state.get("viewer")
     if not current:
-        st.info("点文件列表、回答下的文件或实验表格里的一行，会在这里打开。")
+        st.info("双击文件列表或实验表格里的一行，或点回答下的文件，会在这里打开。")
         return
     run_id, path = current
     with st.container(horizontal=True, vertical_alignment="center"):
@@ -1372,7 +1373,7 @@ def show_workspace(run_id: str | None, running: bool, highlight: set[str], tall:
                 st.markdown("**这里会显示研究生成的文件**")
                 st.caption(
                     "开始研究后，每次实验的记录、程序裁决、每轮提案、日志和最终报告都会实时出现在这里。"
-                    "点文件就在查看器里打开。"
+                    "双击文件就在查看器里打开。"
                 )
                 return
             if notice := st.session_state.pop("files_notice", None):
@@ -1397,62 +1398,51 @@ def show_experiments(run_id: str, running: bool) -> None:
     if not rows:
         st.caption("还没有实验。")
         return
-    frame = pd.DataFrame(
+    tones = {
+        "run": "blue",
+        "best": "green",
+        "delivered": "blue-strong",
+        "warn": "amber",
+        "fail": "red",
+    }
+    row_table(
+        [
+            {"label": "实验"},
+            {"label": metric, "align": "right"},
+            {"label": "较此前最优", "align": "right"},
+            {"label": "状态"},
+            {"label": "来源"},
+            {"label": "耗时(s)", "align": "right"},
+            {"label": "做了什么", "max": "18rem"},
+        ],
         [
             {
-                "实验": row["id"],
-                metric: row["score"],
-                "较此前最优": row["delta"],
-                "状态": row["status"],
-                "来源": row["source"],
-                "耗时(s)": row["seconds"],
-                "做了什么": row["change"] or MODEL_NAMES.get(row["model"], row["model"]),
+                "id": row["id"],
+                "open": row["path"] or None,
+                "cells": [
+                    row["id"],
+                    number_text(row["score"], ".4f"),
+                    number_text(row["delta"], "+.4f"),
+                    row["status"],
+                    row["source"],
+                    number_text(row["seconds"], ".1f"),
+                    row["change"] or MODEL_NAMES.get(row["model"], row["model"]),
+                ],
+                "tones": [None, None, None, tones.get(row["kind"]), None, None, None],
             }
             for row in rows
-        ]
+        ],
+        key=f"experiments-{run_id}",
+        on_open=partial(open_file, run_id),
     )
-    for column in (metric, "较此前最优", "耗时(s)"):
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    tints = {
-        "run": "background-color: #EEF3FF; color: #1D4ED8",
-        "best": "background-color: #ECFDF3; color: #05603A",
-        "delivered": "background-color: #EEF3FF; color: #1D4ED8; font-weight: 600",
-        "warn": "background-color: #FFFAEB; color: #93370D",
-        "fail": "background-color: #FEF3F2; color: #B42318",
-    }
     kinds = [row["kind"] for row in rows]
-    styler = frame.style.format(
-        {metric: "{:.4f}", "较此前最优": "{:+.4f}", "耗时(s)": "{:.1f}"}, na_rep="—"
-    ).apply(
-        lambda column: (
-            [tints.get(kind, "") for kind in kinds] if column.name == "状态" else [""] * len(column)
-        ),
-        axis=0,
-    )
-    widget = f"experiments-{run_id}-{st.session_state.get('exp_nonce', 0)}"
-    st.dataframe(
-        styler,
-        key=widget,
-        hide_index=True,
-        on_select=partial(pick_experiment, run_id, widget, rows),
-        selection_mode="single-row",
-        column_config={"做了什么": st.column_config.TextColumn(width="medium")},
-    )
     rounds = {row["round"] for row in rows if isinstance(row["round"], int) and row["round"] > 0}
     policy = read_json(base / "contract.json").get("decision_policy") or {}
     st.caption(
         f"共 {sum(kind != 'run' for kind in kinds)} 个实验 · {len(rounds)} 轮 · "
-        f"最小提升 {effect_text(policy.get('min_effect'))} · 点一行在查看器打开"
+        f"最小提升 {effect_text(policy.get('min_effect'))} · 双击一行在查看器打开"
     )
     rerun_if_asked()
-
-
-def pick_experiment(run_id: str, widget: str, rows: list[dict]) -> None:
-    selection = st.session_state.get(widget)
-    picked = selection.selection.rows if selection else []
-    if picked and rows[picked[0]]["path"]:
-        st.session_state["exp_nonce"] = st.session_state.get("exp_nonce", 0) + 1
-        open_file(run_id, rows[picked[0]]["path"])
 
 
 def show_tokens(run_id: str) -> None:
@@ -1804,8 +1794,17 @@ st.html("""<style>
   white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; line-height: 1.35;
 }
-/* The whole row, caption included, opens the run. */
+/* The whole row, caption included, opens the run: the overlay must anchor to the row,
+   so Streamlit's position:relative element containers inside it are made static. */
+[class*="st-key-hrow-"] [data-testid="stElementContainer"] {position: static;}
 [class*="st-key-hrow-"] button::after {content: ""; position: absolute; inset: 0;}
+[class*="st-key-hrow-"] [data-testid="stCaptionContainer"] {pointer-events: none;}
+/* Streamlit pulls captions up by -1rem to cancel the paragraph margin we drop here. */
+[class*="st-key-hrow-"] [data-testid="stCaptionContainer"],
+[class*="st-key-projruns-"] > [data-testid="stElementContainer"]
+  [data-testid="stCaptionContainer"] {
+  margin-bottom: 0 !important;
+}
 [class*="st-key-hrow-"] [data-testid="stCaptionContainer"] p {
   margin: .05rem .5rem 0; font-size: .75rem;
 }
