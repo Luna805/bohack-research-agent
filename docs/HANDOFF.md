@@ -32,7 +32,7 @@ ruff check .
 | W10 展示与材料 | ⚠️ 进行中 | 对话页第一版已合入（`budgetlab/ui/app.py`：示例任务、后台运行、0 Token 快捷问答）；CSV 上传、开放问答、PPT 未完成 |
 | 第二个任务 | ✅ | UCI Adult（改为不做 MLE-bench），`configs/adult.yaml` |
 | 通用 CSV 上传 | ✅ | `budgetlab/tasks/csv_task.py`；原始 Bank CSV 上传后的结果与内置任务完全一致 |
-| P1 经验库 / 自定义特征 | ❌ | 未开始 |
+| P1 经验库 / 自定义特征 | ⚠️ | 经验库最小版已完成（分支 `b/memory`，默认关闭，待 B review）；自定义特征未开始 |
 
 **开发矩阵实测（f1_macro，脚本化提案，不是 LLM，各 1 次重复，机器空闲时运行）：**
 
@@ -112,7 +112,7 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 | 15 | **正式矩阵运行**（19:30 冻结、20:00 打 tag 开跑） | C | yirran | 待 20:00 | `results/final-*` 提交，代码版本非 dirty |
 | P1 | `LLMSettings` 支持 `extra_body` | A | Yolo | ✅ 已合入 | 关闭思考模式 |
 | 17 | 冻结前修复：PyArrow 锁定版本（页面打不开）、单特征 CSV 崩溃 | B（协调人代修） | yirran | ✅（`c/pre-freeze-fixes`） | 锁定环境能打开页面；单特征 CSV 能跑完 |
-| P1 | 经验库 `budgetlab/memory/` | B | Luna805 | ⏸ 冻结前不合入（协调人决定）；本地 `b/memory` 有 1 个未推送的提交 | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |
+| P1 | 经验库 `budgetlab/memory/` | B | yirran（协调人代 B）+ Claude Code；需和 Luna805 确认没有重复开发 | ✅ 已合入 main（`d7b6e80`，11-14 冻结后由协调人合入；默认关闭，正式矩阵配置没有 `memory:` 段，不影响正式成绩） | 能写能读 ✅；快照 `bank-v1.json` 已冻结；有经验 vs 无经验对照 1 次（Adult，scripted）：没有提升，如实记录在 C-eval 日志 |
 
 对话式研究页的流程和约束见 TEAM.md 第 4 节；时间线和合流点见第 5 节：13:00、16:00 两次合流；19:30 代码冻结；20:00 打 tag 并开跑正式矩阵。
 

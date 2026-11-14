@@ -227,16 +227,29 @@ python -m budgetlab.benchmark --resume <matrix_id>                            # 
 
 ## 6. 经验库（P1，B 提供，A 使用）
 
+> 状态：最小版已实现（分支 `b/memory`），**默认关闭**。没有 `memory:` 段或 `enabled: false` 时，run 的行为、上下文和产物与之前完全一致；`contract.memory_snapshot_hash` 仍是空快照哈希 `stable_hash([])`。
+
 ```text
-memory/<snapshot_id>.json     # 冻结后只读；run_config 中记录所用快照的哈希
-[{lesson_id, version, conditions{rows?, positive_rate?, has_sentinel?, ...},
-  action{kind, detail}, observed_effect{metric, delta, comparator, run_id, experiment_ids},
-  support, counterexamples, status: candidate|supported_in_sources|deprecated, limitations}]
+budgetlab/memory/snapshots/<name>.json     # 发布后只读（同名文件拒绝覆盖）；contract 和 run_config 记录快照哈希
+[{lesson_id, version, action_key,
+  conditions{primary_metric, rows_range, minority_rate_range, requires_families,
+             requires_column_kinds, source_columns, source_task_ids},
+  action{kind, scope, parts, summary, spec, spec_hash},
+  observed_effect{metric, delta, comparator, run_id, experiment_ids, min_effect},
+  support, counterexamples[observation], evidence[observation],
+  status: candidate|supported_in_sources|deprecated, limitations}]
+observation = {task_id, run_id, experiment_id, comparator, metric, delta, min_effect,
+               verdict: candidate_pass|confirmed_pass|not_met}
 ```
 
-- B 提供 `match_lessons(profile, card, snapshot) -> list[dict]`，最多返回 3 条，由控制器放进上下文的 `lessons` 键。
+- **提取**（`budgetlab/memory/extract.py`）：只读开发侧产物 `eda.json`、`contract.json`、`experiments/*.json`、`confirmation.json`；不读 `final_evaluation.json`、holdout 预测和 `data/sealed/`，也不抄 LLM/Critic 的文字。每个探索实验取它的程序裁决（有 `hypothesis_check` 就用它，否则用 `vs_baseline`），动作 = 该实验规格与对照规格的逐因子差异。按动作分组：至少一次通过才成为经验；`not_met` 记为反例；确认通过的最优方案记为 `supported_in_sources`；反例多于支持则 `deprecated`；`invalid`/`inconclusive`/失败的实验忽略。
+- **条件**：行数在来源的 1/5～5 倍之间；少数类比例按"不平衡（<0.35）/平衡"两档；动作用到的模型族必须在目标任务允许范围内；带特征动作的经验要求目标任务有同名可用列，或有同类性质的列（哨兵值 / 有缺失 / 偏态数值）。
+- **匹配**：`match_lessons(profile, card, snapshot, *, primary_metric=None, allowed_families=None, limit=3)`，排除 `deprecated` 和条件不符的经验；排序依次为状态（已确认优先）、支持数减反例数、效应量、`lesson_id`，结果确定；最多 3 条，空快照返回空列表。
+- **进入上下文**：匹配在 contract 冻结前完成，结果放在 `ResearchState.lessons`；`build_context()` 只在有经验时追加 `lessons`（精简视图：`lesson_id, evidence_ref, status, source_tasks, action, action_scope, spec, observed_effect, support, counterexamples, limitations`）和 `lessons_note`，并把 `lesson:<id>` 加进 `valid_evidence_refs`。经验不能绕过筛查、去重、预算和裁决。脚本化提案器会先复测匹配到的经验规格（去掉目标任务里没有的列上的特征动作）。
+- **run 目录新增**（只在开启时）：`memory_retrieved.json`（快照引用、哈希、匹配到的 ID 和经验全文）、`memory_draft.json`（本 run 的经验草稿）、`memory_usage.json`（每条检索到的经验：被哪些候选引用、被哪些实验复测、程序裁决；`helpful` 只表示复测时通过了裁决）；`run_config.json` 追加 `memory{enabled, snapshot_ref, snapshot_hash, snapshot_lessons, matched_lesson_ids}`；`summary.json` 追加 `memory{snapshot_hash, matched_lesson_ids, usage{retrieved, cited, tested, helpful}, draft_lessons}`；账本事件 `memory_matched`、`memory_draft_written`、`memory_usage_written`。
+- **命令**：`python -m budgetlab.memory extract --run-id <id>`（打印草稿）、`publish --run-id <id> [--run-id ...] --out budgetlab/memory/snapshots/<name>.json`（发布新快照，打印哈希）、`show --snapshot <path> [--task <task_id>]`（列出经验，给出对某个任务匹配 / 跳过的原因）。
+- 正式评测期间快照只读：run 中不会写快照，草稿只写进各自的 run 目录；要更新必须用新文件名重新 `publish`。配置里写的快照不存在时，在创建 run 目录前直接报错。
 - A 只负责在提示词里说明这些经验怎么用；A 不写经验库。
-- 正式评测期间不更新快照。
 
 ## 7. 配置文件分段
 
@@ -247,6 +260,7 @@ memory/<snapshot_id>.json     # 冻结后只读；run_config 中记录所用快�
 | `task_id`、`cv_folds`、`split_seed`、`calibration_split_seeds`、`confirmation_split_seeds`、`training_seed`、`search_seed`、`min_effect_floor`、`primary_metric`、`text_columns`、`allowed_model_families`、`random_search_experiments` | C |
 | `budget`、`loop` | B |
 | `proposer`、`llm` | A |
+| `memory`（`enabled`、`snapshot`；只允许这两个键） | B |
 
 - 开发期的实验配置各自新建文件，例如 `configs/llm-dev.yaml`、`configs/benchmark/dev.yaml`。
 - 正式矩阵使用的配置在冻结时由协调人确认，之后不再改。

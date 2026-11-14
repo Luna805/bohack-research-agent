@@ -1,0 +1,41 @@
+# Lesson bank source run: empty bank, writes memory_draft.json.
+# Copy of configs/bank_marketing.yaml plus a memory section; loop/budget identical.
+# Development / demo task: predict before the call whether the client subscribes.
+task_id: bank_marketing
+proposer: scripted          # scripted | llm  (CLI --proposer overrides)
+cv_folds: 5
+split_seed: 42
+calibration_split_seeds: [11, 23, 37, 53, 71]
+confirmation_split_seeds: [137, 2026, 31415]
+training_seed: 42
+search_seed: 2026
+min_effect_floor: 0.002
+budget:
+  max_llm_tokens: 0          # set > 0 to authorise live LLM spending
+  max_llm_requests: 0
+  max_cost_usd: null
+  max_experiments: 40
+  max_fits: 200
+  max_tool_search_fits: 30
+  max_total_seconds: 1800
+  experiment_timeout_seconds: 120
+  max_empty_proposal_rounds: 2
+loop:
+  max_rounds: 8
+  initial_tool_search: 2
+  tool_search_batch: 2
+  stagnation_tool_search: 2
+  stagnation_replan: 2
+  stagnation_stop: 4
+  cheap_experiment_seconds: 30
+llm:
+  model: null                # or LLM_MODEL in .env
+  base_url: null             # or LLM_BASE_URL in .env; key only via LLM_API_KEY in .env
+  output_mode: tool          # tool | native | prompted
+  max_output_tokens: 3000
+  output_retries: 1
+  timeout_seconds: 120
+  input_price_per_mtok: null
+  output_price_per_mtok: null
+memory:
+  enabled: true               # no snapshot -> empty bank
