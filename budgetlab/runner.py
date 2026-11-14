@@ -57,27 +57,47 @@ class Runner:
             "model_path": str(model_path),
             "simulate_sleep_seconds": simulate_sleep_seconds,
         }
-        atomic_write_json(job_path, payload)
-        self.ledger.append(
-            "experiment_started",
-            action_id=action_id,
-            artifact_ref=artifact_rel,
-            details={"purpose": purpose},
-        )
-        env = os.environ.copy()
-        env.update(
-            {
-                "OMP_NUM_THREADS": "1",
-                "MKL_NUM_THREADS": "1",
-                "OPENBLAS_NUM_THREADS": "1",
-                "NUMEXPR_NUM_THREADS": "1",
-            }
-        )
         started = time.monotonic()
         status = "failed"
         raw: dict[str, object] = {}
         unknown = ResourceVector()
+
+        def write_logs(stdout: object, stderr: object) -> None:
+            def text(value: object) -> str:
+                if value is None:
+                    return ""
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", errors="replace")
+                return str(value)
+
+            try:
+                (self.run_dir / "logs" / f"{experiment_id}.stdout.log").write_text(
+                    text(stdout), encoding="utf-8"
+                )
+                (self.run_dir / "logs" / f"{experiment_id}.stderr.log").write_text(
+                    text(stderr), encoding="utf-8"
+                )
+            except OSError:
+                # Accounting must still close even when the filesystem cannot retain logs.
+                pass
+
         try:
+            atomic_write_json(job_path, payload)
+            self.ledger.append(
+                "experiment_started",
+                action_id=action_id,
+                artifact_ref=artifact_rel,
+                details={"purpose": purpose},
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "OMP_NUM_THREADS": "1",
+                    "MKL_NUM_THREADS": "1",
+                    "OPENBLAS_NUM_THREADS": "1",
+                    "NUMEXPR_NUM_THREADS": "1",
+                }
+            )
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -95,15 +115,17 @@ class Runner:
                 timeout=timeout,
                 check=False,
             )
-            (self.run_dir / "logs" / f"{experiment_id}.stdout.log").write_text(
-                completed.stdout, encoding="utf-8"
-            )
-            (self.run_dir / "logs" / f"{experiment_id}.stderr.log").write_text(
-                completed.stderr, encoding="utf-8"
-            )
+            write_logs(completed.stdout, completed.stderr)
             if result_path.exists():
-                raw = json.loads(result_path.read_text(encoding="utf-8"))
-                status = str(raw.get("status", "failed"))
+                try:
+                    decoded = json.loads(result_path.read_text(encoding="utf-8"))
+                    if not isinstance(decoded, dict):
+                        raise ValueError("worker result must be a JSON object")
+                    raw = decoded
+                    status = str(raw.get("status", "failed"))
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    raw = {"error": f"invalid worker result: {type(exc).__name__}: {exc}"}
+                    unknown = ResourceVector(fits=planned_fits)
             else:
                 raw = {"error": f"worker exited {completed.returncode} without a result"}
                 unknown = ResourceVector(fits=planned_fits)
@@ -111,19 +133,62 @@ class Runner:
             status = "timeout"
             raw = {"error": f"worker timeout after {timeout}s: {exc}"}
             unknown = ResourceVector(fits=planned_fits)
+            write_logs(exc.stdout, exc.stderr)
+        except OSError as exc:
+            raw = {"error": f"failed to start worker: {type(exc).__name__}: {exc}"}
+            unknown = ResourceVector(fits=planned_fits)
+            write_logs("", raw["error"])
+        except Exception:
+            self.budget.mark_interrupted_unknown(action_id)
+            raise
         duration = time.monotonic() - started
-        fit_attempts = int(raw.get("fit_attempts", 0))
-        fit_completed = int(raw.get("fit_completed", 0))
+
+        def fit_count(name: str) -> int:
+            value = raw[name]
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"{name} must be an integer")
+            return value
+
+        if unknown.fits:
+            fit_attempts = 0
+            fit_completed = 0
+        else:
+            try:
+                worker_status = raw["status"]
+                if worker_status not in {"ok", "failed", "timeout", "invalid"}:
+                    raise ValueError(f"unsupported status: {worker_status!r}")
+                status = str(worker_status)
+                fit_attempts = fit_count("fit_attempts")
+                fit_completed = fit_count("fit_completed")
+                if not 0 <= fit_completed <= fit_attempts <= planned_fits:
+                    raise ValueError("fit counters are outside the planned range")
+            except (KeyError, TypeError, ValueError) as exc:
+                status = "failed"
+                raw = {"error": f"invalid worker result: {type(exc).__name__}: {exc}"}
+                unknown = ResourceVector(fits=planned_fits)
+                fit_attempts = 0
+                fit_completed = 0
         self.budget.settle(
             action_id,
             ResourceVector(experiments=1, fits=fit_attempts, seconds=duration),
             unknown=unknown,
         )
-        fold_scores = tuple(float(value) for value in raw.get("fold_scores", []))
-        mean_score = raw.get("mean_score")
-        error = raw.get("error")
+        try:
+            scores_value = raw.get("fold_scores", [])
+            if not isinstance(scores_value, (list, tuple)):
+                raise ValueError("fold_scores must be an array")
+            fold_scores = tuple(float(value) for value in scores_value)
+            mean_value = raw.get("mean_score")
+            mean_score = None if mean_value is None else float(mean_value)
+            error_value = raw.get("error")
+            if error_value is not None and not isinstance(error_value, str):
+                raise ValueError("error must be a string or null")
+            error = error_value
+        except (TypeError, ValueError, OverflowError) as exc:
+            status, fold_scores, mean_score = "failed", (), None
+            error = f"invalid worker result: {type(exc).__name__}: {exc}"
         if not all(math.isfinite(value) for value in fold_scores) or (
-            mean_score is not None and not math.isfinite(float(mean_score))
+            mean_score is not None and not math.isfinite(mean_score)
         ):
             status, fold_scores, mean_score = "invalid", (), None
             error = "worker returned a non-finite score"
