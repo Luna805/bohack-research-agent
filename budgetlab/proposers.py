@@ -26,13 +26,16 @@ from .schemas import (
     Candidate,
     CriticAdvice,
     ExperimentSpec,
+    ForestRegressorSpec,
     ForestSpec,
+    HistBoostRegressorSpec,
     HistBoostSpec,
     Hypothesis,
     LogisticSpec,
     PreprocessingSpec,
     ProposalBatch,
     ResourceVector,
+    RidgeSpec,
     SentinelToMissing,
     TaskContract,
 )
@@ -84,8 +87,11 @@ def build_context(
             "prediction_time": card.get("prediction_time"),
             "decision_use": card.get("decision_use"),
             "primary_metric": contract.primary_metric,
+            "task_type": contract.task_type,
+            "direction": contract.decision_policy.direction,
             "development_rows": profile["rows"],
-            "positive_rate": profile["positive_rate"],
+            "positive_rate": profile.get("positive_rate"),
+            "target_mean": profile.get("target_mean"),
         },
         "legal_space": {
             "model_families": list(contract.allowed_model_families),
@@ -104,6 +110,7 @@ def build_context(
         "excluded_columns": excluded,
         "decision_rule": {
             "comparison": "paired same-fold mean delta of the primary metric (5-fold CV)",
+            "direction": contract.decision_policy.direction,
             "min_effect": round(contract.decision_policy.min_effect, 5),
             "final_check": "the best passing candidate is re-run against the baseline on "
             "three unseen split seeds before it can be delivered",
@@ -205,6 +212,50 @@ class Critic(Protocol):
 # ------------------------------------------------------------------------------ scripted
 
 
+def _family_default(family: str) -> tuple[Any, PreprocessingSpec]:
+    """A sensible first spec for a model family, so a scripted switch is always valid."""
+    if family == "logistic_regression":
+        return (
+            LogisticSpec(family=family, class_weight="balanced", max_iter=500),
+            PreprocessingSpec(numeric_scaler="standard"),
+        )
+    if family == "random_forest":
+        return (
+            ForestSpec(family=family, class_weight="balanced", min_samples_leaf=5),
+            PreprocessingSpec(),
+        )
+    if family == "hist_gradient_boosting":
+        return HistBoostSpec(family=family, class_weight="balanced"), PreprocessingSpec()
+    if family == "ridge":
+        return RidgeSpec(family=family), PreprocessingSpec(numeric_scaler="standard")
+    if family == "random_forest_regressor":
+        return (
+            ForestRegressorSpec(family=family, min_samples_leaf=5),
+            PreprocessingSpec(),
+        )
+    return HistBoostRegressorSpec(family=family), PreprocessingSpec()
+
+
+_TWEAKS: dict[str, list[dict[str, Any]]] = {
+    "random_forest": [
+        {"min_samples_leaf": 10},
+        {"min_samples_leaf": 2},
+        {"n_estimators": 200},
+    ],
+    "hist_gradient_boosting": [
+        {"learning_rate": 0.05, "max_iter": 200},
+        {"min_samples_leaf": 50},
+    ],
+    "logistic_regression": [{"c": 0.2}, {"c": 5.0}],
+    "ridge": [{"alpha": 0.1}, {"alpha": 10.0}],
+    "random_forest_regressor": [{"min_samples_leaf": 10}, {"n_estimators": 200}],
+    "hist_gradient_boosting_regressor": [
+        {"learning_rate": 0.05, "max_iter": 200},
+        {"min_samples_leaf": 50},
+    ],
+}
+
+
 class ScriptedProposer:
     """Deterministic zero-token rules: weight classes, switch family, fix sentinels, tune."""
 
@@ -216,7 +267,7 @@ class ScriptedProposer:
     def _moves(self, best: ExperimentSpec, context: dict[str, Any]) -> list[tuple[str, Any]]:
         moves: list[tuple[str, ExperimentSpec]] = []
         model = best.model
-        if getattr(model, "class_weight", None) is None:
+        if "class_weight" in type(model).model_fields and model.class_weight is None:
             moves.append(
                 (
                     "Balanced class weights should raise minority-class F1 on an imbalanced task.",
@@ -229,16 +280,7 @@ class ScriptedProposer:
         for family in families:
             if family == model.family:
                 continue
-            new_model: Any
-            if family == "logistic_regression":
-                new_model = LogisticSpec(family=family, class_weight="balanced", max_iter=500)
-                prep = PreprocessingSpec(numeric_scaler="standard")
-            elif family == "random_forest":
-                new_model = ForestSpec(family=family, class_weight="balanced", min_samples_leaf=5)
-                prep = PreprocessingSpec()
-            else:
-                new_model = HistBoostSpec(family=family, class_weight="balanced")
-                prep = PreprocessingSpec()
+            new_model, prep = _family_default(family)
             moves.append(
                 (
                     f"A {family} model may capture structure the current best misses.",
@@ -264,19 +306,7 @@ class ScriptedProposer:
                         best.model_copy(update={"feature_actions": actions}),
                     )
                 )
-        tweaks: dict[str, list[dict[str, Any]]] = {
-            "random_forest": [
-                {"min_samples_leaf": 10},
-                {"min_samples_leaf": 2},
-                {"n_estimators": 200},
-            ],
-            "hist_gradient_boosting": [
-                {"learning_rate": 0.05, "max_iter": 200},
-                {"min_samples_leaf": 50},
-            ],
-            "logistic_regression": [{"c": 0.2}, {"c": 5.0}],
-        }
-        for update in tweaks[model.family]:
+        for update in _TWEAKS.get(model.family, []):
             moves.append(
                 (
                     f"Tuning {', '.join(update)} may trade bias and variance better.",

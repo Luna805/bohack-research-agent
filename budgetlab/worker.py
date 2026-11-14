@@ -7,10 +7,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
 
 from .contracts import stable_hash
-from .data import load_development
+from .data import cv_splitter, load_development
 from .ledger import atomic_write_json
 from .pipeline import build_pipeline, score_predictions
 from .schemas import ExperimentSpec, TaskContract
@@ -46,7 +45,7 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
             fold_scores: list[float] = []
         else:
             seed = int(payload["split_seed"])
-            splitter = StratifiedKFold(n_splits=contract.cv_folds, shuffle=True, random_state=seed)
+            splitter = cv_splitter(contract.task_type, contract.cv_folds, seed)
             fold_scores = []
             splits = list(splitter.split(features, bundle.target))
             # Fingerprint of which rows validate in each fold; paired comparisons require equality.

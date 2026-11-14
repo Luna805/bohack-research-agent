@@ -39,7 +39,7 @@ class DraftProtocol(BaseModel):
     prediction_time: str = Field(min_length=1)
     target_column: str = Field(min_length=1)
     positive_label: str = Field(min_length=1)
-    primary_metric: Literal["f1_macro", "accuracy", "roc_auc"]
+    primary_metric: Literal["f1_macro", "accuracy", "roc_auc", "r2", "rmse", "mae"]
     fields: list[FieldDecision] = Field(min_length=1)
     questions_for_user: list[str] = Field(default_factory=list)
     source: Literal["llm", "card", "manual"] = "llm"
@@ -55,8 +55,9 @@ Decide:
 - prediction_time: the moment before which predictions must be made (e.g. "before the outbound
   call is placed").
 - target_column and positive_label: infer them from the description (e.g. the "yes"/"1" class).
-- primary_metric: f1_macro when the classes are imbalanced, roc_auc for ranking, accuracy only
-  when the description says the classes are balanced.
+- primary_metric: for a categorical target, f1_macro when classes are imbalanced, roc_auc for
+  ranking, accuracy only when the description says the classes are balanced. For a continuous
+  target, r2 (higher is better) or rmse/mae (lower is better).
 - fields: one FieldDecision for EVERY column except target_column. availability is one of:
   * "identifier": a row id or key with no predictive value.
   * "post_outcome": only known after the outcome is known (e.g. call duration, a "days since"

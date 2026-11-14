@@ -1,0 +1,20 @@
+# Fast multiclass plumbing smoke on the saturated scikit-learn Iris data (not a research claim).
+task_id: iris
+proposer: scripted
+cv_folds: 5
+split_seed: 42
+calibration_split_seeds: [11, 23, 37]
+confirmation_split_seeds: [137, 2026, 31415]
+training_seed: 42
+search_seed: 2026
+min_effect_floor: 0.002
+budget:
+  max_experiments: 30
+  max_fits: 150
+  max_tool_search_fits: 20
+  max_total_seconds: 1200
+  experiment_timeout_seconds: 120
+loop:
+  max_rounds: 3
+  initial_tool_search: 1
+  stagnation_stop: 3

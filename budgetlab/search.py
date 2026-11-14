@@ -15,18 +15,26 @@ from .schemas import (
     DropColumns,
     ExperimentSpec,
     FeatureAction,
+    ForestRegressorSpec,
     ForestSpec,
+    HistBoostRegressorSpec,
     HistBoostSpec,
     Log1pColumns,
     LogisticSpec,
     PreprocessingSpec,
+    RidgeSpec,
     SentinelToMissing,
     TaskContract,
     TextTfidfSpec,
 )
 
 
-def baseline_spec() -> ExperimentSpec:
+def baseline_spec(task_type: str = "binary") -> ExperimentSpec:
+    if task_type == "regression":
+        return ExperimentSpec(
+            model=RidgeSpec(family="ridge", alpha=1.0),
+            preprocessing=PreprocessingSpec(numeric_scaler="standard"),
+        )
     return ExperimentSpec(
         model=LogisticSpec(family="logistic_regression", c=1.0, max_iter=500),
         preprocessing=PreprocessingSpec(numeric_scaler="standard"),
@@ -70,13 +78,30 @@ class SpecSampler:
                 min_samples_leaf=self.rng.choice([1, 3, 5, 10, 20]),
                 class_weight=weight,
             )
-        return HistBoostSpec(
+        if family == "hist_gradient_boosting":
+            return HistBoostSpec(
+                family=family,
+                learning_rate=self.rng.choice([0.03, 0.06, 0.1, 0.2]),
+                max_iter=self.rng.choice([60, 100, 200]),
+                max_leaf_nodes=self.rng.choice([15, 31, 63]),
+                min_samples_leaf=self.rng.choice([10, 20, 50]),
+                class_weight=weight,
+            )
+        if family == "ridge":
+            return RidgeSpec(family=family, alpha=self.rng.choice([0.1, 1.0, 10.0, 100.0]))
+        if family == "random_forest_regressor":
+            return ForestRegressorSpec(
+                family=family,
+                n_estimators=self.rng.choice([60, 100, 200]),
+                max_depth=self.rng.choice([None, 6, 10, 16]),
+                min_samples_leaf=self.rng.choice([1, 3, 5, 10, 20]),
+            )
+        return HistBoostRegressorSpec(
             family=family,
             learning_rate=self.rng.choice([0.03, 0.06, 0.1, 0.2]),
             max_iter=self.rng.choice([60, 100, 200]),
             max_leaf_nodes=self.rng.choice([15, 31, 63]),
             min_samples_leaf=self.rng.choice([10, 20, 50]),
-            class_weight=weight,
         )
 
     def _actions(self) -> tuple[FeatureAction, ...]:
@@ -107,7 +132,7 @@ class SpecSampler:
 
     def sample(self) -> ExperimentSpec:
         model = self._model()
-        scaler = "standard" if model.family == "logistic_regression" else "none"
+        scaler = "standard" if model.family in ("logistic_regression", "ridge") else "none"
         text = None
         if self.text_columns and self.rng.random() < 0.5:
             text = TextTfidfSpec(

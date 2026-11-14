@@ -1,0 +1,18 @@
+task_id: diabetes
+title: Diabetes disease progression (regression demo)
+source: scikit-learn bundled Diabetes dataset
+business_question: predict a quantitative measure of disease progression one year after baseline from clinical variables
+prediction_time: baseline clinical measurements are available at prediction time
+decision_use: offline regression plumbing demo; not a research claim
+error_costs: R-squared (higher is better)
+entity: one row per patient
+deployment_data: not applicable
+target:
+  column: target
+  positive_label: null
+  description: continuous disease-progression score (higher is worse)
+missing_values: none
+fields: []
+default_availability: available
+known_limitations:
+  - Standardised and near-saturated benchmark; useful for verifying the regression path.

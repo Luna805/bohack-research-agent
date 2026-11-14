@@ -1,0 +1,18 @@
+task_id: iris
+title: Iris species (three-class demo)
+source: scikit-learn bundled Iris dataset
+business_question: classify an iris flower into one of three species from sepal and petal measurements
+prediction_time: flower measurements are available at classification time
+decision_use: offline multiclass plumbing demo; not a research claim
+error_costs: macro-F1 across the three species
+entity: one row per flower sample
+deployment_data: not applicable
+target:
+  column: target
+  positive_label: null
+  description: species label (0/1/2)
+missing_values: none
+fields: []
+default_availability: available
+known_limitations:
+  - Near-saturated benchmark; useful for verifying the multiclass path, not for research gains.

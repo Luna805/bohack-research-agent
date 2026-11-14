@@ -26,7 +26,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
-from ..schemas import Metric
+from ..schemas import Metric, TaskType
 
 CARD_DIR = Path(__file__).parent / "cards"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -50,6 +50,7 @@ class TaskDefinition:
     holdout_seed: int
     load_raw: Callable[[Path], tuple[pd.DataFrame, pd.Series]]
     card_path: Path | None = None
+    task_type: TaskType = "binary"
 
     @property
     def card(self) -> dict[str, Any]:
@@ -216,6 +217,20 @@ def _load_breast_cancer(raw_dir: Path) -> tuple[pd.DataFrame, pd.Series]:
     return raw.data.copy(), raw.target.astype(int).rename("target")
 
 
+def _load_iris(raw_dir: Path) -> tuple[pd.DataFrame, pd.Series]:
+    from sklearn.datasets import load_iris
+
+    raw = load_iris(as_frame=True)
+    return raw.data.copy(), raw.target.astype(int).rename("target")
+
+
+def _load_diabetes(raw_dir: Path) -> tuple[pd.DataFrame, pd.Series]:
+    from sklearn.datasets import load_diabetes
+
+    raw = load_diabetes(as_frame=True)
+    return raw.data.copy(), raw.target.astype(float).rename("target")
+
+
 TASKS: dict[str, TaskDefinition] = {
     "bank_marketing": TaskDefinition(
         task_id="bank_marketing",
@@ -240,6 +255,24 @@ TASKS: dict[str, TaskDefinition] = {
         holdout_fraction=0.2,
         holdout_seed=20261114,
         load_raw=_load_breast_cancer,
+    ),
+    "iris": TaskDefinition(
+        task_id="iris",
+        target_column="target",
+        primary_metric="f1_macro",
+        holdout_fraction=0.2,
+        holdout_seed=20261114,
+        load_raw=_load_iris,
+        task_type="multiclass",
+    ),
+    "diabetes": TaskDefinition(
+        task_id="diabetes",
+        target_column="target",
+        primary_metric="r2",
+        holdout_fraction=0.2,
+        holdout_seed=20261114,
+        load_raw=_load_diabetes,
+        task_type="regression",
     ),
 }
 

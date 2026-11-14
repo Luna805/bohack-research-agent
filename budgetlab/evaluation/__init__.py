@@ -21,7 +21,14 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+    roc_auc_score,
+)
 
 from ..data import ROW_ID, file_sha256, sealed_holdout_path
 from ..ledger import EventLedger, atomic_write_json, utc_now
@@ -39,25 +46,28 @@ PREDICTIONS_FILE = "holdout_predictions.csv"
 def metric_value(
     metric: str, y_true: np.ndarray, y_pred: np.ndarray, y_score: np.ndarray | None
 ) -> float:
-    """Same definitions as training-time scoring (binary labels 0/1, macro-F1 zero_division=0)."""
+    """Metric matching training-time scoring for binary, multiclass and regression targets."""
     if metric == "roc_auc":
         if y_score is None:
-            raise ValueError("roc_auc requires positive-class scores")
+            raise ValueError("roc_auc requires class scores")
         if len(np.unique(y_true)) < 2:
             return float("nan")
-        return float(roc_auc_score(y_true, y_score))
-    counts = np.bincount(2 * y_true + y_pred, minlength=4)
-    return _from_counts(metric, counts)
-
-
-def _from_counts(metric: str, counts: np.ndarray) -> float:
-    tn, fp, fn, tp = (float(value) for value in counts)
+        scores = np.asarray(y_score)
+        if scores.ndim == 2 and scores.shape[1] == 2:
+            return float(roc_auc_score(y_true, scores[:, 1]))
+        return float(roc_auc_score(y_true, scores, multi_class="ovr", average="macro"))
+    if metric in ("r2", "rmse", "mae"):
+        true = np.asarray(y_true, dtype=float)
+        pred = np.asarray(y_pred, dtype=float)
+        if metric == "r2":
+            return float(r2_score(true, pred))
+        if metric == "rmse":
+            return float(np.sqrt(mean_squared_error(true, pred)))
+        return float(mean_absolute_error(true, pred))
     if metric == "accuracy":
-        return (tp + tn) / max(tp + tn + fp + fn, 1.0)
+        return float(accuracy_score(y_true, y_pred))
     if metric == "f1_macro":
-        f1_pos = 2 * tp / (2 * tp + fp + fn) if (2 * tp + fp + fn) else 0.0
-        f1_neg = 2 * tn / (2 * tn + fn + fp) if (2 * tn + fn + fp) else 0.0
-        return (f1_pos + f1_neg) / 2
+        return float(f1_score(y_true, y_pred, average="macro", zero_division=0))
     raise ValueError(f"unsupported metric: {metric}")
 
 
@@ -72,14 +82,12 @@ def _resample_values(
     rng = np.random.default_rng(seed)
     n = len(y_true)
     values = np.empty((resamples, len(predictions)))
-    codes = [2 * y_true + y_pred for y_pred, _ in predictions]
     for b in range(resamples):
         idx = rng.integers(0, n, size=n)
-        for k, (_, y_score) in enumerate(predictions):
-            if metric == "roc_auc":
-                values[b, k] = metric_value(metric, y_true[idx], codes[k][idx] % 2, y_score[idx])
-            else:
-                values[b, k] = _from_counts(metric, np.bincount(codes[k][idx], minlength=4))
+        for k, (y_pred, y_score) in enumerate(predictions):
+            values[b, k] = metric_value(
+                metric, y_true[idx], y_pred[idx], None if y_score is None else y_score[idx]
+            )
     return values
 
 
@@ -110,7 +118,9 @@ def _load_holdout(run_dir: Path) -> tuple[TaskContract, pd.Series, pd.DataFrame]
         raise ValueError("sealed holdout file does not match the contract")
     frame = pd.read_csv(holdout_path)
     row_ids = frame.pop(ROW_ID).astype(str)
-    target = frame.pop(contract.target_column).astype(int)
+    target = frame.pop(contract.target_column)
+    if contract.task_type != "regression":
+        target = target.astype(int)
     target.index = row_ids
     return contract, target, frame[list(contract.approved_feature_columns)]
 
@@ -137,12 +147,16 @@ def evaluate_frozen_run(run_id: str, runs_root: Path = Path("runs")) -> dict[str
     contract, target, features = _load_holdout(run_dir)
     pipeline = joblib.load(model_path)
     y_true = target.to_numpy()
-    y_pred = np.asarray(pipeline.predict(features)).astype(int)
-    y_score = (
-        np.asarray(pipeline.predict_proba(features))[:, 1]
-        if hasattr(pipeline, "predict_proba")
-        else None
-    )
+    y_pred = np.asarray(pipeline.predict(features))
+    if contract.task_type == "regression":
+        y_pred = y_pred.astype(float)
+        y_score = None
+    else:
+        y_pred = y_pred.astype(int)
+        y_score = None
+        if hasattr(pipeline, "predict_proba"):
+            proba = np.asarray(pipeline.predict_proba(features))
+            y_score = proba[:, 1] if proba.shape[1] == 2 else None
     metric = contract.primary_metric
     score = metric_value(metric, y_true, y_pred, y_score)
     low, high = bootstrap_ci(metric, y_true, y_pred, y_score)
@@ -212,7 +226,10 @@ def paired_bootstrap(
 
     def unpack(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray | None]:
         scores = frame["y_score"].to_numpy(dtype=float)
-        return frame["y_pred"].to_numpy(dtype=int), None if np.isnan(scores).all() else scores
+        y_pred = frame["y_pred"].to_numpy()
+        if contract.task_type != "regression":
+            y_pred = y_pred.astype(int)
+        return y_pred, None if np.isnan(scores).all() else scores
 
     sets = [unpack(mine), unpack(theirs)]
     point = metric_value(metric, y_true, *sets[0]) - metric_value(metric, y_true, *sets[1])

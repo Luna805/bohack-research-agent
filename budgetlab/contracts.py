@@ -12,6 +12,7 @@ from .schemas import (
     ProposalBatch,
     ProtocolSpec,
     TaskContract,
+    metric_direction,
 )
 
 
@@ -45,6 +46,7 @@ def freeze_contract(
         dataset_hash=protocol.dataset_hash,
         scenario_card_hash=protocol.scenario_card_hash,
         target_column=protocol.target_column,
+        task_type=protocol.task_type,
         primary_metric=protocol.primary_metric,
         prediction_time=protocol.prediction_time,
         approved_feature_columns=protocol.approved_feature_columns,
@@ -56,6 +58,7 @@ def freeze_contract(
         allowed_model_families=protocol.allowed_model_families,
         decision_policy=DecisionPolicy(
             metric=protocol.primary_metric,
+            direction=metric_direction(protocol.primary_metric),
             min_effect_floor=protocol.min_effect_floor,
             noise_floor=calibration.noise_floor,
             min_effect=calibration.min_effect,

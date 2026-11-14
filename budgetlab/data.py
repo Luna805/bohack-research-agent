@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 
 from .contracts import stable_hash
 from .ledger import atomic_write_json
@@ -36,6 +36,7 @@ class DatasetBundle:
     row_ids: tuple[str, ...]
     dataset_hash: str
     target_column: str
+    task_type: str = "binary"
 
 
 def development_path(data_root: Path, task_id: str) -> Path:
@@ -75,10 +76,11 @@ def prepare_task(task_id: str, data_root: Path, *, force: bool = False) -> dict[
     frame.insert(0, ROW_ID, [f"{task_id}:{index}" for index in range(len(frame))])
     frame[task.target_column] = target.to_numpy()
     positions = list(range(len(frame)))
+    stratify = None if task.task_type == "regression" else target
     dev_positions, holdout_positions = train_test_split(
         positions,
         test_size=task.holdout_fraction,
-        stratify=target,
+        stratify=stratify,
         random_state=task.holdout_seed,
     )
     development = frame.iloc[sorted(dev_positions)].reset_index(drop=True)
@@ -87,6 +89,7 @@ def prepare_task(task_id: str, data_root: Path, *, force: bool = False) -> dict[
     _write_frame(holdout, holdout_path)
     manifest = {
         "task_id": task_id,
+        "task_type": task.task_type,
         "target_column": task.target_column,
         "holdout_fraction": task.holdout_fraction,
         "holdout_seed": task.holdout_seed,
@@ -112,7 +115,10 @@ def load_development(task_id: str, data_root: Path) -> DatasetBundle:
         )
     frame = pd.read_csv(path)
     row_ids = tuple(frame.pop(ROW_ID).astype(str))
-    target = frame.pop(task.target_column).astype(int).rename(task.target_column)
+    target = frame.pop(task.target_column)
+    if task.task_type != "regression":
+        target = target.astype(int)
+    target = target.rename(task.target_column)
     return DatasetBundle(
         dataset_ref=task_id,
         features=frame,
@@ -120,6 +126,7 @@ def load_development(task_id: str, data_root: Path) -> DatasetBundle:
         row_ids=row_ids,
         dataset_hash=file_sha256(path),
         target_column=task.target_column,
+        task_type=task.task_type,
     )
 
 
@@ -130,12 +137,19 @@ def numeric_minima(features: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def cv_splitter(task_type: str, cv_folds: int, seed: int):
+    """K-fold splitter: random (not stratified) for regression, stratified otherwise."""
+    if task_type == "regression":
+        return KFold(n_splits=cv_folds, shuffle=True, random_state=seed)
+    return StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=seed)
+
+
 def split_manifest(
     bundle: DatasetBundle, seeds: Iterable[int], cv_folds: int
 ) -> tuple[dict[str, object], str]:
     manifests: list[dict[str, object]] = []
     for seed in seeds:
-        splitter = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=seed)
+        splitter = cv_splitter(bundle.task_type, cv_folds, seed)
         folds = []
         for fold_index, (train, valid) in enumerate(splitter.split(bundle.features, bundle.target)):
             folds.append(

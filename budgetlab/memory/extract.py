@@ -157,7 +157,7 @@ def _conditions(
     return LessonConditions(
         primary_metric=contract["primary_metric"],
         rows_range=(max(1, rows // ROWS_FACTOR), rows * ROWS_FACTOR),
-        minority_rate_range=_minority_range(float(eda["positive_rate"])),
+        minority_rate_range=_minority_range(float(eda.get("positive_rate", 0.5))),
         requires_families=(spec["model"]["family"],),
         requires_column_kinds=tuple(kinds),
         source_columns=tuple(columns),

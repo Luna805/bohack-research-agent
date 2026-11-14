@@ -9,8 +9,25 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
 
-Metric = Literal["f1_macro", "accuracy", "roc_auc"]
-ModelFamily = Literal["logistic_regression", "random_forest", "hist_gradient_boosting"]
+Metric = Literal["f1_macro", "accuracy", "roc_auc", "r2", "rmse", "mae"]
+ModelFamily = Literal[
+    "logistic_regression",
+    "random_forest",
+    "hist_gradient_boosting",
+    "ridge",
+    "random_forest_regressor",
+    "hist_gradient_boosting_regressor",
+]
+TaskType = Literal["binary", "multiclass", "regression"]
+Direction = Literal["maximize", "minimize"]
+
+REGRESSION_METRICS = ("r2", "rmse", "mae")
+REGRESSION_FAMILIES = ("ridge", "random_forest_regressor", "hist_gradient_boosting_regressor")
+
+
+def metric_direction(metric: Metric) -> Direction:
+    """Whether the frozen metric is 'better when higher' or 'better when lower'."""
+    return "minimize" if metric in ("rmse", "mae") else "maximize"
 
 
 class TextTfidfSpec(StrictModel):
@@ -81,7 +98,35 @@ class HistBoostSpec(StrictModel):
     class_weight: Literal["balanced"] | None = None
 
 
-ModelSpec = Annotated[LogisticSpec | ForestSpec | HistBoostSpec, Field(discriminator="family")]
+class RidgeSpec(StrictModel):
+    family: Literal["ridge"]
+    alpha: float = Field(default=1.0, gt=0, le=1e6)
+
+
+class ForestRegressorSpec(StrictModel):
+    family: Literal["random_forest_regressor"]
+    n_estimators: int = Field(default=100, ge=20, le=300)
+    max_depth: int | None = Field(default=None, ge=2, le=32)
+    min_samples_leaf: int = Field(default=1, ge=1, le=50)
+
+
+class HistBoostRegressorSpec(StrictModel):
+    family: Literal["hist_gradient_boosting_regressor"]
+    learning_rate: float = Field(default=0.1, gt=0, le=1)
+    max_iter: int = Field(default=100, ge=20, le=300)
+    max_leaf_nodes: int = Field(default=31, ge=2, le=63)
+    min_samples_leaf: int = Field(default=20, ge=2, le=100)
+
+
+ModelSpec = Annotated[
+    LogisticSpec
+    | ForestSpec
+    | HistBoostSpec
+    | RidgeSpec
+    | ForestRegressorSpec
+    | HistBoostRegressorSpec,
+    Field(discriminator="family"),
+]
 
 
 class ExperimentSpec(StrictModel):
@@ -180,7 +225,7 @@ class ProtocolSpec(StrictModel):
     dataset_hash: str
     scenario_card_hash: str
     target_column: str
-    task_type: Literal["binary"] = "binary"
+    task_type: TaskType = "binary"
     primary_metric: Metric = "f1_macro"
     prediction_time: str
     approved_feature_columns: tuple[str, ...] = Field(min_length=1)
@@ -195,7 +240,7 @@ class ProtocolSpec(StrictModel):
     cv_folds: int = Field(default=5, ge=2, le=5)
     search_training_seed: int = 42
     allowed_model_families: tuple[ModelFamily, ...] = Field(min_length=1)
-    min_effect_floor: float = Field(default=0.002, gt=0, le=1)
+    min_effect_floor: float = Field(default=0.002, gt=0)
     budgets: BudgetLimits
     loop_policy: LoopPolicy = LoopPolicy()
     sealed_holdout_sha256: str
@@ -223,19 +268,19 @@ class CalibrationReport(StrictModel):
     protocol_hash: str
     split_scores: tuple[float, ...] = Field(min_length=3, max_length=5)
     ddof: Literal[1] = 1
-    noise_floor: float = Field(ge=0, le=1)
-    min_effect: float = Field(gt=0, le=1)
+    noise_floor: float = Field(ge=0)
+    min_effect: float = Field(gt=0)
     evidence_refs: tuple[str, ...] = Field(min_length=3)
 
 
 class DecisionPolicy(StrictModel):
     policy_id: str = "practical_gain_v2"
     metric: Metric
-    direction: Literal["maximize"] = "maximize"
+    direction: Direction = "maximize"
     final_comparator: Literal["initial_valid_baseline"] = "initial_valid_baseline"
-    min_effect_floor: float = Field(gt=0, le=1)
-    noise_floor: float = Field(ge=0, le=1)
-    min_effect: float = Field(gt=0, le=1)
+    min_effect_floor: float = Field(gt=0)
+    noise_floor: float = Field(ge=0)
+    min_effect: float = Field(gt=0)
     calibration_split_seeds: tuple[int, ...] = Field(min_length=3, max_length=5)
     confirmation_split_seeds: tuple[int, ...] = Field(min_length=3, max_length=3)
     min_positive_fraction: float = Field(default=2 / 3, gt=0, le=1)
@@ -249,7 +294,7 @@ class TaskContract(StrictModel):
     dataset_hash: str
     scenario_card_hash: str
     target_column: str
-    task_type: Literal["binary"] = "binary"
+    task_type: TaskType = "binary"
     primary_metric: Metric
     prediction_time: str
     approved_feature_columns: tuple[str, ...] = Field(min_length=1)

@@ -2,6 +2,40 @@
 
 新的写在最上面。每条包含：时间、谁（人或代理）、做了什么、怎么验证的（命令或 run_id）、遇到的问题、下一步。
 
+### 2026-11-14 冻结后（约 20:30）· Yolo(A) + Claude Code，分支 `a/multitask`
+- 做了：实现多分类与回归任务支持（在**新分支 `a/multitask`** 上，未碰冻结的 main / `benchmark-freeze` 矩阵）。核心是把「二分类专用」的四处——指标方向、效应量、模型族、目标编码——泛化成三种 `task_type`：`binary` / `multiclass` / `regression`。改动清单见下方表格。
+- 验证：
+  - `pytest`：新增 `tests/test_multitask.py` 8 个离线测试全过；`test_evaluator.py` 13 个全过（修正了一个旧测试：把「分数必须 0–1」改成**按指标**判定——回归的 RMSE 无上界、R² 可为负，分类指标仍强制 0–1）。
+  - `ruff check .` 与 `ruff format --check` 全过。
+  - 端到端（脚本化提案，离线 sklearn 数据，不联网）：`diabetes`（回归，R²）research 跑通 → holdout R²=0.571（CI [0.449, 0.654]）；`iris`（多分类，macro-F1）→ holdout F1=1.0。二分类主路径（Bank/Adult）由全量测试覆盖，未被破坏。
+- 问题（务必读）：
+  1. **这是跨角色改动**，动了 B 的 `schemas/pipeline/evaluator/search/contracts/state/worker/controller/data/profile/memory` 和 C 的 `evaluation/tasks`。按 `TEAM.md` 第 2 节，**合并前需在群里知会 B、C 并 review**；未 review 前不往 main 合。
+  2. 分支是冻结安全的：正式矩阵的 `main` 一行没动，多任务只是加分项、不在正式成绩里。
+  3. **效应量归一化只做了第一版**：回归用 R²（maximize，天然近似有界）为主指标；`min_effect`/`noise_floor` 仍按 `stdev` 计算，对 R² 合理，对 RMSE/MAE（minimize、有量纲）只在同一数据尺度下成立。跨任务不可比，见 handoff 的「已知限制」。
+  4. CSV 上传（`csv_task.py`）**仍是二分类**；多分类/回归走内置任务卡（`iris` / `diabetes`）。
+- 下一步：请 B/C review 后决定是否合入 main；回归的「尺度无关效应量」（相对基线改进比例）留到提交后。
+
+## 多任务支持改动说明（分支 `a/multitask`）
+
+| 文件 | 归属 | 改了什么 |
+|---|---|---|
+| `schemas.py` | B | `Metric` 加 `r2/rmse/mae`；`ModelFamily` 加 `ridge/random_forest_regressor/hist_gradient_boosting_regressor` 及对应 Spec；`TaskType`/`Direction` 别名 + `metric_direction()`；`task_type` 放开 `binary`→三值；放宽 `min_effect/noise_floor/min_effect_floor` 的 `le=1` 上界 |
+| `pipeline.py` | B | logistic `solver="liblinear"`→`lbfgs`（支持多分类）；新增三个回归器分支；`score_predictions` 支持多分类 F1/accuracy/roc_auc(ovr) 与回归 R²/RMSE/MAE |
+| `evaluator.py` | B | `result_problem` 按指标判定分数范围（回归只查有限性）；`evaluate_candidate`/`evaluate_confirmation` 加 `direction`（minimize 时 `delta<=-min_effect` 才 pass） |
+| `data.py` / `worker.py` | B | 新增 `cv_splitter`（回归用 `KFold`，其余 `StratifiedKFold`）；`prepare_task` 回归不做分层切分；`load_development` 回归保留 float 目标；`DatasetBundle` 带 `task_type` |
+| `state.py` | B | `ResearchState.optimize` + `add()` 按方向选「best」（minimize 取更小分） |
+| `contracts.py` | B | `freeze_contract` 冻结 `task_type` 与 `decision_policy.direction=metric_direction(primary_metric)` |
+| `search.py` | B | `baseline_spec(task_type)`（回归用 Ridge）；`SpecSampler._model` 覆盖三个回归器族 |
+| `controller.py` | B | 全程透传 `task_type`；`evaluate_candidate`/`evaluate_confirmation` 传 `direction`；`finalize` 排序按方向 |
+| `profile.py` | B | `profile_development` 按 task_type：二分类给 `positive_rate`，回归给 `target_mean/target_std`，多分类给 `n_classes/class_share` |
+| `memory/match.py`、`memory/extract.py` | B | 非二分类缺 `positive_rate` 时回退 0.5，避免开记忆时 KeyError（经验库本身仍是分类专用） |
+| `evaluation/__init__.py` | C | `metric_value`/`_resample_values` 泛化到多分类与回归；holdout 读入与预测输出按 task_type |
+| `tasks/__init__.py` + `cards/iris.yaml`、`cards/diabetes.yaml` | C | `TaskDefinition` 加 `task_type`；新增两个离线内置任务 |
+| `proposers.py` | A | `build_context` 加 `task_type/direction/target_mean`；`ScriptedProposer._moves` 覆盖回归器族（`_family_default`+`_TWEAKS`，class_weight 只对分类器） |
+| `agents/protocol_agent.py` | A | `DraftProtocol.primary_metric` 扩到回归/多分类指标 + 提示词一句 |
+| `configs/iris.yaml`、`configs/diabetes.yaml`（新） | — | 两个 demo 配置（diabetes 指定回归器族 + `r2`） |
+| `tests/test_multitask.py`（新） | A | 8 个离线测试 |
+
 ## 代码改动说明（2026-11-14 · chier1 + Claude Code）
 
 | 文件 | 改了什么 | 为什么这么改 |

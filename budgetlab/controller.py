@@ -132,6 +132,7 @@ def build_protocol(
         dataset_hash=bundle.dataset_hash,
         scenario_card_hash=stable_hash(card),
         target_column=task.target_column,
+        task_type=task.task_type,
         primary_metric=config.get("primary_metric", task.primary_metric),
         prediction_time=str(card["prediction_time"]),
         approved_feature_columns=approved,
@@ -162,6 +163,7 @@ def provisional_contract(protocol: ProtocolSpec, manifest_hash: str) -> TaskCont
         dataset_hash=protocol.dataset_hash,
         scenario_card_hash=protocol.scenario_card_hash,
         target_column=protocol.target_column,
+        task_type=protocol.task_type,
         primary_metric=protocol.primary_metric,
         prediction_time=protocol.prediction_time,
         approved_feature_columns=protocol.approved_feature_columns,
@@ -242,7 +244,9 @@ def setup_run(
         },
     )
     features = bundle.features[list(approved)]
-    profile = profile_development(bundle.features, bundle.target, card, protocol.text_columns)
+    profile = profile_development(
+        bundle.features, bundle.target, card, protocol.text_columns, task_type=protocol.task_type
+    )
     atomic_write_json(run_dir / "eda.json", profile)
     ledger.append("profile_written", artifact_ref="eda.json")
     lessons: list[dict[str, Any]] = []
@@ -282,7 +286,7 @@ def setup_run(
     provisional = provisional_contract(protocol, manifest_hash)
     runner = Runner(run_dir, ledger, budget, data_root)
     minima = numeric_minima(features)
-    base_spec = baseline_spec()
+    base_spec = baseline_spec(protocol.task_type)
     validate_experiment_spec(base_spec, provisional, numeric_minima=minima)
     baseline_result = runner.execute(
         base_spec,
@@ -343,7 +347,10 @@ def setup_run(
         elapsed_seconds=ctx.elapsed(),
     )
     state = ResearchState(
-        baseline=baseline_record, min_effect=contract.decision_policy.min_effect, lessons=lessons
+        baseline=baseline_record,
+        min_effect=contract.decision_policy.min_effect,
+        optimize=contract.decision_policy.direction,
+        lessons=lessons,
     )
     _write_experiment(ctx, baseline_record)
     return ctx, state
@@ -390,7 +397,9 @@ def run_experiment(
     candidate: Candidate | None = None,
 ) -> tuple[ExperimentRecord, bool]:
     """Execute one exploration experiment and judge it with program rules only."""
-    min_effect = ctx.contract.decision_policy.min_effect
+    decision = ctx.contract.decision_policy
+    min_effect = decision.min_effect
+    direction = decision.direction
     result = ctx.runner.execute(
         spec,
         ctx.contract,
@@ -399,12 +408,12 @@ def run_experiment(
         experiment_id=experiment_id,
     )
     previous_best = state.best
-    vs_baseline = evaluate_candidate(result, state.baseline.result, min_effect)
-    vs_best = evaluate_candidate(result, previous_best.result, min_effect)
+    vs_baseline = evaluate_candidate(result, state.baseline.result, min_effect, direction)
+    vs_best = evaluate_candidate(result, previous_best.result, min_effect, direction)
     hypothesis_check = None
     if candidate is not None:
         comparator = state.get(candidate.hypothesis.comparator_experiment_id)
-        hypothesis_check = evaluate_candidate(result, comparator.result, min_effect)
+        hypothesis_check = evaluate_candidate(result, comparator.result, min_effect, direction)
     record = ExperimentRecord(
         experiment_id=experiment_id,
         origin=origin,  # type: ignore[arg-type]
@@ -855,13 +864,22 @@ def finalize(ctx: RunContext, state: ResearchState) -> dict[str, Any]:
         for record in state.experiments
         if record.vs_baseline is not None and record.vs_baseline.policy_status == "candidate_pass"
     ]
-    passing.sort(
-        key=lambda record: (
-            -(record.result.mean_score or -1),
-            record.result.duration_seconds,
-            record.spec_hash,
+    if contract.decision_policy.direction == "minimize":
+        passing.sort(
+            key=lambda record: (
+                record.result.mean_score if record.result.mean_score is not None else float("inf"),
+                record.result.duration_seconds,
+                record.spec_hash,
+            )
         )
-    )
+    else:
+        passing.sort(
+            key=lambda record: (
+                -(record.result.mean_score or -1),
+                record.result.duration_seconds,
+                record.spec_hash,
+            )
+        )
     finalist = passing[0] if passing else None
     delivered = baseline
     confirmation_status = "not_required_no_candidate"
@@ -887,7 +905,10 @@ def finalize(ctx: RunContext, state: ResearchState) -> dict[str, Any]:
             confirmation_refs.extend([candidate_run.artifact_ref, baseline_run.artifact_ref])
             # Same validity checks as exploration: complete, finite, genuinely paired folds.
             split_check = evaluate_candidate(
-                candidate_run, baseline_run, contract.decision_policy.min_effect
+                candidate_run,
+                baseline_run,
+                contract.decision_policy.min_effect,
+                contract.decision_policy.direction,
             )
             split_ref = f"confirmation/split-{seed}.json"
             atomic_write_json(ctx.run_dir / split_ref, split_check.model_dump(mode="json"))
@@ -907,6 +928,7 @@ def finalize(ctx: RunContext, state: ResearchState) -> dict[str, Any]:
             contract.decision_policy.min_positive_fraction,
             tuple(confirmation_refs),
             expected_splits=len(contract.decision_policy.confirmation_split_seeds),
+            direction=contract.decision_policy.direction,
         )
         atomic_write_json(ctx.run_dir / "confirmation.json", confirmation.model_dump(mode="json"))
         ctx.ledger.append("confirmation_completed", artifact_ref="confirmation.json")

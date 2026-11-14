@@ -5,11 +5,23 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.decomposition import TruncatedSVD
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+    roc_auc_score,
+)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -142,7 +154,7 @@ def build_pipeline(spec: ExperimentSpec, features: pd.DataFrame, training_seed: 
             class_weight=model.class_weight,
             max_iter=model.max_iter,
             random_state=training_seed,
-            solver="liblinear",
+            solver="lbfgs",
         )
     elif model.family == "random_forest":
         estimator = RandomForestClassifier(
@@ -162,6 +174,24 @@ def build_pipeline(spec: ExperimentSpec, features: pd.DataFrame, training_seed: 
             class_weight=model.class_weight,
             random_state=training_seed,
         )
+    elif model.family == "ridge":
+        estimator = Ridge(alpha=model.alpha, random_state=training_seed)
+    elif model.family == "random_forest_regressor":
+        estimator = RandomForestRegressor(
+            n_estimators=model.n_estimators,
+            max_depth=model.max_depth,
+            min_samples_leaf=model.min_samples_leaf,
+            random_state=training_seed,
+            n_jobs=1,
+        )
+    elif model.family == "hist_gradient_boosting_regressor":
+        estimator = HistGradientBoostingRegressor(
+            learning_rate=model.learning_rate,
+            max_iter=model.max_iter,
+            max_leaf_nodes=model.max_leaf_nodes,
+            min_samples_leaf=model.min_samples_leaf,
+            random_state=training_seed,
+        )
     else:
         raise ValueError(f"unsupported model family: {model.family}")
     return Pipeline(
@@ -178,12 +208,20 @@ def score_predictions(
 ) -> float:
     predictions = pipeline.predict(features)
     if metric == "f1_macro":
-        return float(f1_score(target, predictions, average="macro", labels=[0, 1], zero_division=0))
+        return float(f1_score(target, predictions, average="macro", zero_division=0))
     if metric == "accuracy":
         return float(accuracy_score(target, predictions))
     if metric == "roc_auc":
         if not hasattr(pipeline, "predict_proba"):
-            raise ValueError("roc_auc requires continuous positive-class scores")
+            raise ValueError("roc_auc requires continuous class scores")
         probabilities = pipeline.predict_proba(features)
-        return float(roc_auc_score(target, probabilities[:, 1]))
+        if probabilities.shape[1] == 2:
+            return float(roc_auc_score(target, probabilities[:, 1]))
+        return float(roc_auc_score(target, probabilities, multi_class="ovr", average="macro"))
+    if metric == "r2":
+        return float(r2_score(target, predictions))
+    if metric == "rmse":
+        return float(np.sqrt(mean_squared_error(target, predictions)))
+    if metric == "mae":
+        return float(mean_absolute_error(target, predictions))
     raise ValueError(f"unsupported metric: {metric}")

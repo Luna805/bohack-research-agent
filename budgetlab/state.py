@@ -114,6 +114,7 @@ class RoundRecord:
 class ResearchState:
     baseline: ExperimentRecord
     min_effect: float
+    optimize: str = "maximize"
     experiments: list[ExperimentRecord] = field(default_factory=list)
     rounds: list[RoundRecord] = field(default_factory=list)
     seen: dict[str, str] = field(default_factory=dict)
@@ -162,9 +163,20 @@ class ResearchState:
         self.experiments.append(record)
         self.seen[record.spec_hash] = record.experiment_id
         improved = False
-        if record.ok and record.result.mean_score > (self.best.result.mean_score or -1):
-            improved = (record.vs_previous_best or 0.0) >= self.min_effect
-            self.best_id = record.experiment_id
+        best_mean = self.best.result.mean_score
+        if record.ok and record.result.mean_score is not None and best_mean is not None:
+            better = (
+                record.result.mean_score < best_mean
+                if self.optimize == "minimize"
+                else record.result.mean_score > best_mean
+            )
+            if better:
+                delta = record.vs_previous_best
+                if self.optimize == "minimize":
+                    improved = delta is not None and delta <= -self.min_effect
+                else:
+                    improved = (delta or 0.0) >= self.min_effect
+                self.best_id = record.experiment_id
         record.best_score_after = self.best.result.mean_score
         return improved
 

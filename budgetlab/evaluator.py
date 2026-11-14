@@ -11,7 +11,13 @@ from __future__ import annotations
 import math
 import statistics
 
-from .schemas import CalibrationReport, EvaluationRecord, ExecutionResult
+from .schemas import (
+    REGRESSION_METRICS,
+    CalibrationReport,
+    Direction,
+    EvaluationRecord,
+    ExecutionResult,
+)
 
 
 def result_problem(result: ExecutionResult, label: str = "result") -> str | None:
@@ -20,7 +26,11 @@ def result_problem(result: ExecutionResult, label: str = "result") -> str | None
         return f"{label}_{result.status}"
     if not result.fold_scores or result.mean_score is None:
         return f"{label}_missing_scores"
-    if any(not math.isfinite(s) or s < 0 or s > 1 for s in result.fold_scores):
+    if result.metric in REGRESSION_METRICS:
+        bad = any(not math.isfinite(s) for s in result.fold_scores)
+    else:
+        bad = any(not math.isfinite(s) or s < 0 or s > 1 for s in result.fold_scores)
+    if bad:
         return f"{label}_invalid_fold_score"
     if not math.isclose(result.mean_score, statistics.mean(result.fold_scores), abs_tol=1e-9):
         return f"{label}_mean_fold_mismatch"
@@ -71,7 +81,10 @@ def calibrate(
 
 
 def evaluate_candidate(
-    candidate: ExecutionResult, baseline: ExecutionResult, min_effect: float
+    candidate: ExecutionResult,
+    baseline: ExecutionResult,
+    min_effect: float,
+    direction: Direction = "maximize",
 ) -> EvaluationRecord:
     """Paired same-fold comparison against ``baseline`` (any frozen comparator)."""
     evidence = (candidate.artifact_ref, baseline.artifact_ref)
@@ -99,10 +112,11 @@ def evaluate_candidate(
         )
     )
     mean_delta = statistics.mean(deltas)
+    passed = mean_delta >= min_effect if direction == "maximize" else mean_delta <= -min_effect
     return EvaluationRecord(
         experiment_id=candidate.experiment_id,
         execution_status="ok",
-        policy_status="candidate_pass" if mean_delta >= min_effect else "not_met",
+        policy_status="candidate_pass" if passed else "not_met",
         mean_score=candidate.mean_score,
         mean_paired_delta=mean_delta,
         fold_scores=candidate.fold_scores,
@@ -119,6 +133,7 @@ def evaluate_confirmation(
     evidence_refs: tuple[str, ...],
     *,
     expected_splits: int = 3,
+    direction: Direction = "maximize",
 ) -> EvaluationRecord:
     if len(deltas) != expected_splits:
         return EvaluationRecord(
@@ -130,8 +145,12 @@ def evaluate_confirmation(
             evidence_refs=evidence_refs,
         )
     median_delta = statistics.median(deltas)
-    positive_fraction = sum(delta > 0 for delta in deltas) / len(deltas)
-    passed = median_delta >= min_effect and positive_fraction >= min_positive_fraction
+    if direction == "maximize":
+        positive_fraction = sum(delta > 0 for delta in deltas) / len(deltas)
+        passed = median_delta >= min_effect and positive_fraction >= min_positive_fraction
+    else:
+        positive_fraction = sum(delta < 0 for delta in deltas) / len(deltas)
+        passed = median_delta <= -min_effect and positive_fraction >= min_positive_fraction
     return EvaluationRecord(
         experiment_id=experiment_id,
         execution_status="ok",

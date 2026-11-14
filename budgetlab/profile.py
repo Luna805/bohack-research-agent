@@ -18,6 +18,7 @@ def profile_development(
     target: pd.Series,
     card: dict[str, Any],
     text_columns: tuple[str, ...] = (),
+    task_type: str = "binary",
 ) -> dict[str, Any]:
     availability = field_availability(card, list(features.columns))
     descriptions = {field["name"]: field.get("description", "") for field in card.get("fields", [])}
@@ -58,15 +59,27 @@ def profile_development(
             if unknown_share > 0:
                 entry["unknown_label_share"] = _round(unknown_share, 3)
         if entry["availability"] == "available" and entry["kind"] != "text":
-            rates = _target_rates(series, target, entry["kind"])
-            if rates:
-                entry["positive_rate_by_group"] = rates
+            if task_type == "regression":
+                rates = _target_rates(series, target, entry["kind"])
+                if rates:
+                    entry["target_mean_by_group"] = rates
+            elif task_type == "binary":
+                rates = _target_rates(series, target, entry["kind"])
+                if rates:
+                    entry["positive_rate_by_group"] = rates
+            # multiclass: the per-group label-encoded mean is misleading, so it is omitted.
         columns.append(entry)
-    return {
-        "rows": len(features),
-        "positive_rate": _round(target.mean()),
-        "columns": columns,
-    }
+    result: dict[str, Any] = {"rows": len(features), "columns": columns}
+    if task_type == "binary":
+        result["positive_rate"] = _round(target.mean())
+    elif task_type == "regression":
+        result["target_mean"] = _round(target.mean())
+        result["target_std"] = _round(target.std())
+    else:
+        shares = target.astype(int).value_counts(normalize=True).head(6)
+        result["n_classes"] = int(target.nunique())
+        result["class_share"] = {str(key): _round(value, 3) for key, value in shares.items()}
+    return result
 
 
 def _looks_like_sentinel(series: pd.Series, value: float) -> bool:

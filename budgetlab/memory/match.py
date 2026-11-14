@@ -21,7 +21,7 @@ def target_facts(profile: dict[str, Any]) -> dict[str, Any]:
         if column.get("kind") == "numeric" and abs(column.get("skew") or 0) > 1:
             if (column.get("min") or 0) > -1:
                 kinds.add("skewed_numeric")
-    positive_rate = float(profile["positive_rate"])
+    positive_rate = float(profile.get("positive_rate", profile.get("target_mean", 0.5)))
     return {
         "rows": int(profile["rows"]),
         "minority_rate": min(positive_rate, 1.0 - positive_rate),
