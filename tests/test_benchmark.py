@@ -71,6 +71,19 @@ def test_matrix_writes_interface_files(tmp_path, data_root, smoke_config) -> Non
     assert comparison["paired"][0]["system"] == "budgetlab_no_schedule"
     assert comparison["paired"][0]["pairs"] == 1
     assert float(rows[0]["min_effect"]) > 0
+    for row in rows:
+        assert (
+            float(row["holdout_ci_low"])
+            <= float(row["holdout_score"])
+            <= float(row["holdout_ci_high"])
+        )
+        predictions = (tmp_path / "runs" / row["run_id"] / "holdout_predictions.csv").read_text()
+        assert predictions.splitlines()[0] == "row_id,y_pred,y_score"  # no labels saved
+    (pair_ci,) = comparison["paired"][0]["holdout_ci_pairs"]
+    assert pair_ci["ci95"][0] <= pair_ci["delta"] <= pair_ci["ci95"][1]
+    assert comparison["paired"][0]["pairs_ci_above_zero"] in (0, 1)
+    assert (out_dir / "paired_bootstrap.json").exists()
+    assert "CI>0 / CI<0" in markdown
 
 
 def test_repeats_change_only_the_search_seed(tmp_path, smoke_config) -> None:

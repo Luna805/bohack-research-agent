@@ -40,7 +40,7 @@ import yaml
 
 from .contracts import stable_hash
 from .controller import SYSTEMS, make_agents, run_research
-from .evaluation import evaluate_frozen_run
+from .evaluation import evaluate_frozen_run, paired_bootstrap
 from .ledger import atomic_write_json, utc_now
 from .provenance import code_version_label, environment_info, git_info
 from .runner import PROJECT_ROOT
@@ -82,6 +82,8 @@ COLUMNS = (
     "status",
     "error",
     "min_effect",
+    "holdout_ci_low",
+    "holdout_ci_high",
 )
 DEFAULT_TIE_BAND = 0.002  # used only when a row has no calibrated min_effect
 
@@ -235,6 +237,8 @@ def _row(
         "status": "ok",
         "error": None,
         "min_effect": summary.get("min_effect"),
+        "holdout_ci_low": (final.get("holdout_ci95") or [None, None])[0],
+        "holdout_ci_high": (final.get("holdout_ci95") or [None, None])[1],
     }
 
 
@@ -264,7 +268,37 @@ def _mean(values: list[float]) -> float | None:
     return statistics.mean(values) if values else None
 
 
-def compare_systems(rows: list[dict[str, Any]], reference: str = "random_search") -> dict[str, Any]:
+def paired_holdout_cis(
+    rows: list[dict[str, Any]], reference: str, runs_root: Path
+) -> dict[str, dict[str, Any]]:
+    """Paired bootstrap of holdout differences, keyed "task/r<repeat>/system".
+
+    Pairs whose runs lack saved holdout predictions (evaluated before CIs existed) are skipped.
+    """
+    ok = {
+        (row["task_id"], row["repeat"], row["system"]): row
+        for row in rows
+        if row.get("status") == "ok" and row.get("run_id")
+    }
+    results: dict[str, dict[str, Any]] = {}
+    for (task, repeat, system), row in ok.items():
+        ref = ok.get((task, repeat, reference))
+        if system == reference or ref is None:
+            continue
+        try:
+            results[f"{task}/r{repeat}/{system}"] = paired_bootstrap(
+                runs_root / row["run_id"], runs_root / ref["run_id"]
+            ) | {"repeat": repeat, "run_id": row["run_id"], "reference_run_id": ref["run_id"]}
+        except (FileNotFoundError, ValueError):
+            continue
+    return results
+
+
+def compare_systems(
+    rows: list[dict[str, Any]],
+    reference: str = "random_search",
+    paired_ci: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Paired comparison against ``reference`` plus cost efficiency, from ok rows only.
 
     Pairs share task and repeat, hence the same split, training and search seeds. A pair is a
@@ -351,6 +385,22 @@ def compare_systems(rows: list[dict[str, Any]], reference: str = "random_search"
                     else None,
                 }
             )
+            cis = [(paired_ci or {}).get(f"{task}/r{mine['repeat']}/{system}") for mine, _ in pairs]
+            cis = [ci for ci in cis if ci is not None]
+            paired[-1].update(
+                holdout_ci_pairs=[
+                    {
+                        "repeat": ci["repeat"],
+                        "delta": ci["delta"],
+                        "ci95": ci["ci95"],
+                        "share_positive": ci["share_positive"],
+                        "identical_predictions": ci["identical_predictions"],
+                    }
+                    for ci in cis
+                ],
+                pairs_ci_above_zero=sum(ci["ci95"][0] > 0 for ci in cis) if cis else None,
+                pairs_ci_below_zero=sum(ci["ci95"][1] < 0 for ci in cis) if cis else None,
+            )
     return {"reference": reference, "paired": paired, "efficiency": efficiency}
 
 
@@ -361,7 +411,10 @@ def _fmt(value: float | None, digits: int = 4, signed: bool = False) -> str:
 
 
 def write_aggregate(
-    out_dir: Path, rows: list[dict[str, Any]], reference: str = "random_search"
+    out_dir: Path,
+    rows: list[dict[str, Any]],
+    reference: str = "random_search",
+    paired_ci: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Rows are written in matrix plan order (task -> repeat -> system)."""
     with (out_dir / "aggregate.csv").open("w", encoding="utf-8", newline="") as stream:
@@ -395,7 +448,7 @@ def write_aggregate(
             f" | {_mean_std(col('holdout_score'))} | {_mean_std(col('llm_tokens'), 0)} | "
             f"{_mean_std(col('wall_seconds'), 1)} | {confirmed}/{len(items)} |"
         )
-    comparison = compare_systems(rows, reference)
+    comparison = compare_systems(rows, reference, paired_ci)
     atomic_write_json(out_dir / "comparison.json", comparison)
     if comparison["paired"]:
         lines += [
@@ -403,13 +456,19 @@ def write_aggregate(
             f"## Paired comparison against `{reference}` (same task and repeat, same seeds)",
             "",
             "W/T/L: holdout difference beyond the larger calibrated min_effect of the pair "
-            "(engineering band, not a significance test).",
+            "(engineering band, not a significance test). CI>0 / CI<0: pairs whose paired "
+            "bootstrap 95% interval of the holdout difference lies entirely above / below zero "
+            "(descriptive, same holdout rows for both systems).",
             "",
-            "| task | system | pairs | Δ holdout | W/T/L | LLM tokens | Δ wall s | Δ experiments"
-            " | Δ holdout per 1k tokens |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| task | system | pairs | Δ holdout | W/T/L | CI>0 / CI<0 | LLM tokens | Δ wall s"
+            " | Δ experiments | Δ holdout per 1k tokens |",
+            "|---|---|---|---|---|---|---|---|---|---|",
         ]
         for item in comparison["paired"]:
+            above, below = item.get("pairs_ci_above_zero"), item.get("pairs_ci_below_zero")
+            ci_text = (
+                "–" if above is None else f"{above}/{below} of {len(item['holdout_ci_pairs'])}"
+            )
             spread = item["std_delta_holdout"]
             delta = _fmt(item["mean_delta_holdout"], signed=True) + (
                 f" ± {spread:.4f}" if spread is not None else ""
@@ -417,6 +476,7 @@ def write_aggregate(
             lines.append(
                 f"| {item['task_id']} | {item['system']} | {item['pairs']} | {delta} | "
                 f"{item['wins']}/{item['ties']}/{item['losses']} | "
+                f"{ci_text} | "
                 f"{_fmt(item['mean_llm_tokens'], 0)} | "
                 f"{_fmt(item['mean_delta_wall_seconds'], 1, signed=True)} | "
                 f"{_fmt(item['mean_delta_experiments'], 1, signed=True)} | "
@@ -555,6 +615,12 @@ def run_matrix(
             [rows[s["slot_id"]] for s in slots if s["slot_id"] in rows],
             matrix.get("reference_system", "random_search"),
         )
+    ordered = [rows[s["slot_id"]] for s in slots if s["slot_id"] in rows]
+    reference = matrix.get("reference_system", "random_search")
+    paired_ci = paired_holdout_cis(ordered, reference, runs_root)
+    atomic_write_json(out_dir / "paired_bootstrap.json", paired_ci)
+    write_aggregate(out_dir, ordered, reference, paired_ci)
+    log(f"[{matrix_id}] paired bootstrap computed for {len(paired_ci)} pairs")
     record["finished_at"] = utc_now()
     record["completed_slots"] = sum(row["status"] == "ok" for row in rows.values())
     atomic_write_json(out_dir / "matrix.json", record)

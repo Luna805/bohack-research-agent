@@ -1,6 +1,6 @@
 # BudgetLab 交接说明
 
-> 更新：2026-11-14 12:35（北京时间）· main = `5c304ea`· 提交截止 11/15 08:00
+> 更新：2026-11-14 13:15（北京时间）· main = `5c304ea`· 提交截止 11/15 08:00
 > 开发规范见仓库根目录 [`AGENTS.md`](../AGENTS.md)（人和 AI 代理共用，Claude Code 通过 `CLAUDE.md` 自动读取）。
 
 ## 0. 先做这几件事
@@ -108,6 +108,7 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 | 12 | 成绩表增加"对照随机搜索"和"成本效率"汇总 | C | yirran | ✅（`c/report-tables`，待推送） | 每个系统相对随机搜索的 Δholdout、ΔToken、Δ时间、胜负次数，以及每 1000 Token 带来的提升 |
 | 13 | 演示用 CSV 和协议标准答案 | C | yirran | 待开始（16:00） | 给 D 现场上传用，给 A 的协议 Agent 打分用 |
 | 14 | 数据与评测限制说明初稿 [`LIMITATIONS.md`](LIMITATIONS.md) | C | yirran | ✅ 初稿（待推送）；第 5 节等正式成绩出来后补 | 交给 D 放进报告和 PPT |
+| 16 | holdout 置信区间与配对 bootstrap | C | yirran | ✅（`c/holdout-ci`，待推送） | `final_evaluation.json` 有 `holdout_ci95`；`comparison.json` 有配对区间 |
 | 15 | **正式矩阵运行**（19:30 冻结、20:00 打 tag 开跑） | C | yirran | 待 20:00 | `results/final-*` 提交，代码版本非 dirty |
 | P1 | `LLMSettings` 支持 `extra_body` | A | – | 待认领 | 选定的模型需要时再做 |
 | P1 | 经验库 `budgetlab/memory/` | B | – | 待认领 | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |

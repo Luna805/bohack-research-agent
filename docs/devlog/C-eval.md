@@ -10,6 +10,12 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 12:55–13:15 · yirran + Claude Code（分支 `c/holdout-ci`）
+- 做了：holdout 置信区间和配对检验。`evaluation/` 在唯一一次评测时：用 bootstrap（1000 次，固定种子）算出 95% 区间 `holdout_ci95`；保存不含标签的逐行预测 `holdout_predictions.csv`（标签只留在 `data/sealed/`）。新增 `paired_bootstrap()`：两个交付模型在同一批重采样行上打分后相减。矩阵跑完后对每对"系统 vs 随机搜索"做配对 bootstrap，写入 `paired_bootstrap.json`，并在 `comparison.json` 和 `aggregate.md` 里报"区间完全在 0 以上 / 以下"的配对数；`aggregate.csv` 末尾新增 `holdout_ci_low` 和 `holdout_ci_high` 两列。指标计算改为基于混淆矩阵的向量化版本，有测试保证和训练时的 sklearn 定义一致。
+- 验证：新增 `tests/test_holdout_ci.py`（指标一致性、区间可复现且包含点估计、roc_auc）；`test_benchmark.py` 检查区间、预测文件不含标签、配对区间；锁定环境全套 55 passed；ruff 通过。在机器空闲时用 Bank 实跑一个小矩阵（临时目录，代码未提交）：三个系统交付的模型预测完全相同（holdout 都是 0.7099），单个分数的 95% 区间是 **0.696–0.725**，配对差值为 0、区间 [0, 0]，判为 identical。
+- 结论：Bank 上单个 holdout 分数的不确定性约 ±0.015，这正是限制说明里"几个千分点的差异不算数"的依据。LIMITATIONS 和 INTERFACES（1.2、5）已同步。
+- 注意：在此之前评测过的 run 没有预测文件，无法补算区间，因为补算需要再看一次 holdout，违反"只评一次"的规则。已提交的 `results/dev-20261114T030336Z` 里没有区间；需要的话可以重跑一次开发矩阵。
+
 ### 2026-11-14 约 12:43–12:48 · yirran + Claude Code（分支 `c/report-tables`）
 - 做了：数据与评测限制说明初稿 `docs/LIMITATIONS.md`。第 0 节是可以直接做成 PPT 的一页版；第 1–3 节分别是数据与任务、评测方法、系统与工程的限制（例如：只有两个任务、随机分层切分偏乐观、公开数据集可能被 LLM 记住、holdout 只有一份、工程门槛不是显著性检验、只重复 3 次、只用一个 LLM、对照组按实验数而不是时间对齐、文件级隔离不是沙箱）；第 4 节列出可以说和不要说的表述；第 5 节留给正式成绩出来后补；第 6 节是可以补强的地方（holdout 的 bootstrap 置信区间、Bank 按时间切分的检验）。
 - 验证：文中的数字都对照过配置和数据（holdout 行数、正例率、标定和确认的种子数、随机搜索的 18 次上限、单线程）。

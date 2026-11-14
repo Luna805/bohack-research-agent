@@ -24,6 +24,7 @@
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------- |
 | `summary.json`                                                                                                                                                                          | 一次 run 的全部汇总，**界面和表格都从这里取数**       | C、D     |
 | `final_evaluation.json`                                                                                                                                                                 | holdout 一次性评测结果                    | C、D     |
+| `holdout_predictions.csv` | 评测时保存的逐行预测（`row_id, y_pred, y_score`），**不含标签**；只供配对 bootstrap 使用 | C |
 | `report.md`                                                                                                                                                                             | 人读报告（D 负责模板）                       | 评委      |
 | `events.jsonl`                                                                                                                                                                          | 单写者事件流，`seq` 连续                    | D（轨迹回放） |
 | `experiments/<id>.json`                                                                                                                                                                 | 单个实验的规格、结果和全部裁决                    | D（证据链）  |
@@ -61,7 +62,10 @@ budget{limits, used, reserved, unknown, tail_reserve, reservations}
 
 ### 1.2 `final_evaluation.json`
 
-`run_id, metric, holdout_score, holdout_rows, development_cv_score, dev_minus_holdout, delivered_experiment_id, model_hash, evaluated_at`
+`run_id, metric, holdout_score, holdout_ci95[low, high], bootstrap{method, resamples, seed}, holdout_rows, development_cv_score, dev_minus_holdout, delivered_experiment_id, model_hash, predictions_ref, predictions_sha256, evaluated_at`
+
+- `holdout_ci95`：在 holdout 行上做百分位 bootstrap（1000 次重采样，固定种子）得到的 95% 区间。它描述"这个分数会因为 holdout 抽样而波动多少"，不是显著性检验。
+- 评测时同时保存 `holdout_predictions.csv`（`row_id, y_pred, y_score`），**不含标签**；标签只留在 `data/sealed/`，只有评测模块能读。这份文件只用于系统之间的配对 bootstrap，不复制到 `results/`。
 
 ### 1.3 `events.jsonl`
 
@@ -159,6 +163,7 @@ results/<matrix_id>/
 ├── aggregate.json     # 同一份数据的 JSON 版本
 ├── aggregate.md       # 人读：各系统均值 ± 标准差、相对参照系统的配对比较、成本效率
 ├── comparison.json    # 机读：{"reference", "paired": [...], "efficiency": [...]}（字段见下）
+├── paired_bootstrap.json  # 每一对（任务/重复/系统 vs 参照）的配对 bootstrap 原始结果，矩阵跑完后生成
 └── runs/<run_id>/     # 只复制这三个文件：summary.json, final_evaluation.json, report.md
 ```
 
@@ -171,7 +176,7 @@ delivered_dev_score, holdout_score, dev_minus_holdout,
 llm_calls, llm_requests, llm_tokens, llm_unknown_tokens, cost_usd,
 wall_seconds, train_seconds, experiments, fits, rounds,
 duplicates_blocked, invalid_rejected, direction_changes_agent, direction_changes_rule,
-stop_reason, slot_id, status, error, min_effect
+stop_reason, slot_id, status, error, min_effect, holdout_ci_low, holdout_ci_high
 ```
 
 `status` 为 `ok` 或 `error`。失败的 slot 也会占一行，但除了 `slot_id`、`task_id`、`system`、`repeat`、`error` 之外的字段都为空；可以用 `--resume` 重跑。
@@ -184,7 +189,9 @@ stop_reason, slot_id, status, error, min_effect
 ```text
 paired[]:     task_id, system, reference, pairs, mean_delta_holdout, std_delta_holdout,
               wins, ties, losses, mean_llm_tokens, mean_delta_wall_seconds,
-              mean_delta_experiments, mean_delta_fits, delta_holdout_per_1k_tokens
+              mean_delta_experiments, mean_delta_fits, delta_holdout_per_1k_tokens,
+              holdout_ci_pairs[{repeat, delta, ci95, share_positive, identical_predictions}],
+              pairs_ci_above_zero, pairs_ci_below_zero
 efficiency[]: task_id, system, runs, mean_dev_gain_over_baseline, mean_holdout,
               mean_llm_tokens, mean_wall_seconds, dev_gain_per_1k_tokens, dev_gain_per_minute
 ```
@@ -192,6 +199,7 @@ efficiency[]: task_id, system, runs, mean_dev_gain_over_baseline, mean_holdout,
 - 配对：同一任务、同一次重复（种子相同）的两个 run 互相比较。holdout 差值超过两者校准 `min_effect` 中较大的那个算胜（或负），否则算平。这是工程上的门槛，不是显著性检验。
 - `dev gain` 是"交付方案的开发集分数 − 基线开发集分数"。基线不在 holdout 上评测（holdout 只评交付方案一次），所以和基线比只能用开发集分数；系统之间比较 holdout 用 `paired`。
 - 不花 Token 的系统，"每 1000 Token 的提升"为 `null`，页面上显示为"–"。
+- 配对 bootstrap：两个交付模型在**同一份 holdout 的同一批重采样行**上分别打分后相减，得到差值的 95% 区间。`pairs_ci_above_zero` / `pairs_ci_below_zero` 是区间完全在 0 以上 / 以下的配对数。它们只在矩阵跑完后才会出现（逐个 run 写入时为 `null`）；在加入置信区间之前就评测过的旧 run 没有预测文件，会被跳过。
 
 ### 5.1 矩阵配置与命令（C）
 
