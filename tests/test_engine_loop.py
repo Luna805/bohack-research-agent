@@ -344,6 +344,43 @@ def test_stagnation_replans_once_per_cycle_and_improvement_resets_state(
     assert not state.critic_since_improvement
 
 
+def test_critic_advice_is_citable_only_once_the_critic_has_spoken(
+    tmp_path, make_contract, monkeypatch
+) -> None:
+    # Live runs lost the critic round: the Proposer cited "critic_advice", which was rejected.
+    policy = LoopPolicy(
+        max_rounds=2,
+        initial_tool_search=0,
+        tool_search_batch=1,
+        stagnation_tool_search=1,
+        stagnation_replan=1,
+        stagnation_stop=3,
+    )
+    ctx, state = _context(tmp_path, make_contract, policy=policy)
+    advice = ("baseline", "critic_advice")
+    proposer = _SequenceProposer(
+        [
+            _batch(_candidate("r1a", 0.2, evidence_refs=advice), _candidate("r1b", 0.3)),
+            _batch(
+                _candidate("r2a", 0.4, evidence_refs=advice),
+                _candidate("r2b", 0.5, evidence_refs=advice),
+            ),
+        ]
+    )
+    monkeypatch.setattr(controller, "run_tool_search", lambda *args, **kwargs: False)
+    monkeypatch.setattr(controller, "run_experiment", _fake_run([0.601, 0.602, 0.603]))
+    explore_loop(ctx, state, proposer, _Critic(), schedule=True)
+
+    assert "critic_advice" not in proposer.contexts[0]["valid_evidence_refs"]
+    assert state.rounds[0].rejected == [
+        {"candidate_id": "r1a", "reason": "one or more evidence_refs are unavailable"}
+    ]
+    assert proposer.contexts[1]["mode"] == "replan"
+    assert "critic_advice" in proposer.contexts[1]["valid_evidence_refs"]
+    assert state.rounds[1].rejected == []
+    assert len(state.rounds[1].selected) == 2
+
+
 def test_stop_reasons_and_tail_reserve_protect_finalization(
     tmp_path, make_contract, smoke_config, data_root
 ) -> None:

@@ -31,6 +31,20 @@ os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
 # ------------------------------------------------------------------------------ context
 
+EVIDENCE_EXTRAS = ("eda", "calibration", "scenario_card")
+
+
+def evidence_refs(state: ResearchState) -> list[str]:
+    """What a hypothesis may cite: experiments, fixed run files and the current critic advice.
+
+    The advice is the Critic's saved output (``llm/critic-rNN.output.json``); the Proposer
+    naturally cites it in the round it reacts to it, so it must not be rejected as unknown.
+    """
+    extras = list(EVIDENCE_EXTRAS)
+    if state.critic_advice is not None:
+        extras.append("critic_advice")
+    return state.known_ids() + extras
+
 
 def build_context(
     *,
@@ -91,6 +105,7 @@ def build_context(
         "data_profile": profile_rows,
         "excluded_columns": excluded,
         "decision_rule": {
+            "policy_id": contract.decision_policy.policy_id,
             "comparison": "paired same-fold mean delta of the primary metric (5-fold CV)",
             "min_effect": round(contract.decision_policy.min_effect, 5),
             "final_check": "the best passing candidate is re-run against the baseline on "
@@ -99,7 +114,7 @@ def build_context(
         "baseline_id": state.baseline.experiment_id,
         "best_id": state.best_id,
         "experiments": rows,
-        "valid_evidence_refs": state.known_ids() + ["eda", "calibration", "scenario_card"],
+        "valid_evidence_refs": evidence_refs(state),
         "controller_feedback": list(state.feedback),
         "critic_advice": state.critic_advice,
         "progress": {
@@ -137,6 +152,16 @@ Rules:
 8. predicted_metric_delta is your honest estimate of the paired delta versus the comparator.
    It is only logged; it never influences selection.
 Keep every text field to one or two short sentences.
+
+Each candidate has exactly three keys, and both `hypothesis` and `experiment` are objects:
+{"candidate_id": "...",
+ "hypothesis": {"statement": "...", "evidence_refs": ["..."],
+                "comparator_experiment_id": "...",
+                "decision_policy_id": "<decision_rule.policy_id>",
+                "proposed_change": "...", "predicted_metric_delta": 0.0},
+ "experiment": {"model": {"family": "<one of legal_space.model_families>", ...},
+                "preprocessing": {...}, "feature_actions": [...]}}
+Never write `hypothesis` as a plain string and never leave out `experiment`.
 """
 
 CRITIC_INSTRUCTIONS = """\
@@ -158,6 +183,43 @@ class CallOutcome:
     unknown: ResourceVector = field(default_factory=ResourceVector)
     details: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # Full message history, kept only when the model produced an output the schema rejected.
+    transcript: list[dict[str, Any]] | None = None
+
+
+def _error_lines(content: Any) -> list[str]:
+    """``loc: msg`` lines from a pydantic error list, list indices folded to ``*``."""
+    if not isinstance(content, list):
+        return [str(content)[:200]] if content else []
+    lines = []
+    for item in content:
+        if isinstance(item, dict):
+            loc = ".".join("*" if isinstance(p, int) else str(p) for p in item.get("loc", ()))
+            lines.append(f"{loc}: {item.get('msg', '')}")
+    return lines
+
+
+def _schema_problems(messages: list[Any], exc: BaseException | None) -> tuple[int, list[str]]:
+    """Count outputs the schema rejected and summarise the latest validation errors."""
+    retried = 0
+    lines: list[str] = []
+    for message in messages:
+        for part in getattr(message, "parts", ()):
+            kind = getattr(part, "part_kind", None)
+            if kind == "retry-prompt" or (
+                kind == "tool-return" and getattr(part, "outcome", None) == "retried"
+            ):
+                retried += 1
+                lines = _error_lines(part.content)
+    rejected = retried
+    cause = exc.__cause__ if exc is not None else None
+    if cause is not None and "output retries" in str(exc):
+        rejected += 1  # the last output failed too, which is what ended the call
+        if callable(getattr(cause, "errors", None)):  # pydantic ValidationError
+            lines = _error_lines(cause.errors())
+        elif getattr(cause, "tool_retry", None) is not None:
+            lines = _error_lines(cause.tool_retry.content)
+    return rejected, list(dict.fromkeys(lines))[:8]
 
 
 class Proposer(Protocol):
@@ -200,7 +262,7 @@ class LLMSettings:
     max_output_tokens: int = 3000
     temperature: float | None = None
     timeout_seconds: float = 120.0
-    output_retries: int = 1
+    output_retries: int = 2
     extra_body: dict[str, Any] | None = None
     input_price_per_mtok: float | None = None
     output_price_per_mtok: float | None = None
@@ -216,7 +278,7 @@ class LLMSettings:
             max_output_tokens=int(llm.get("max_output_tokens", 3000)),
             temperature=llm.get("temperature"),
             timeout_seconds=float(llm.get("timeout_seconds", 120)),
-            output_retries=int(llm.get("output_retries", 1)),
+            output_retries=int(llm.get("output_retries", 2)),
             extra_body=llm.get("extra_body"),
             input_price_per_mtok=llm.get("input_price_per_mtok"),
             output_price_per_mtok=llm.get("output_price_per_mtok"),
@@ -346,24 +408,33 @@ class _PydanticAIRole:
             return result.output
 
     def _call(self, context: dict[str, Any]) -> CallOutcome:
+        from pydantic_ai import capture_run_messages
+        from pydantic_ai.messages import ModelMessagesTypeAdapter
         from pydantic_ai.usage import RunUsage
 
         prompt = json.dumps(context, ensure_ascii=False)
         started = time.monotonic()
         output = None
         error = None
+        failure: BaseException | None = None
         trace: dict[str, Any] = {"requests": 0, "usages": []}
         framework_usage = RunUsage()
-        try:
-            if self._test_model is not None:
-                result = self._agent(self._test_model).run_sync(
-                    prompt, usage=framework_usage, usage_limits=self._limits()
-                )
-                output = result.output
-            else:
-                output = asyncio.run(self._run_http(prompt, trace))
-        except Exception as exc:  # provider, validation and limit failures all end the call
-            error = f"{type(exc).__name__}: {str(exc)[:500]}"
+        with capture_run_messages() as messages:
+            try:
+                if self._test_model is not None:
+                    result = self._agent(self._test_model).run_sync(
+                        prompt, usage=framework_usage, usage_limits=self._limits()
+                    )
+                    output = result.output
+                else:
+                    output = asyncio.run(self._run_http(prompt, trace))
+            except Exception as exc:  # provider, validation and limit failures all end the call
+                error = f"{type(exc).__name__}: {str(exc)[:500]}"
+                failure = exc
+        rejected, problems = _schema_problems(messages, failure)
+        transcript = (
+            ModelMessagesTypeAdapter.dump_python(messages, mode="json") if rejected else None
+        )
         if self._test_model is not None:
             usage_source = "framework"
             input_tokens = int(framework_usage.input_tokens or 0)
@@ -404,9 +475,17 @@ class _PydanticAIRole:
             "requests_without_usage": max(missing, 0),
             "seconds": round(time.monotonic() - started, 2),
             "priced": self.settings.input_price_per_mtok is not None,
+            "rejected_outputs": rejected,
         }
+        if problems:
+            details["validation_errors"] = problems
         return CallOutcome(
-            output=output, usage=actual, unknown=unknown, details=details, error=error
+            output=output,
+            usage=actual,
+            unknown=unknown,
+            details=details,
+            error=error,
+            transcript=transcript,
         )
 
 

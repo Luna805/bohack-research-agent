@@ -29,12 +29,12 @@ proposer: llm
 repeat_seed_stride: 1000
 overrides:
   budget:                       # the same hard budget for every system (random_search uses 0 tokens)
-    max_llm_requests: 60        # as in llm-dev.yaml; each call reserves 2 requests (1 retry)
+    max_llm_requests: 60        # as in llm-dev.yaml; each call reserves 3 requests (2 retries)
     max_llm_tokens: 300000      # per run; observed 65k-100k on Bank, reservations are conservative
   llm:
     output_mode: tool
     max_output_tokens: 3000     # A: 2000 was too small and caused empty rounds
-    output_retries: 1
+    output_retries: 2           # live outputs failed the schema on ~half of first attempts
     timeout_seconds: 120
     extra_body:
       enable_thinking: false    # qwen3.7-plus is a reasoning model; thinking off saves tokens and time

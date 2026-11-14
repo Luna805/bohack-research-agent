@@ -91,18 +91,27 @@ class ExperimentSpec(StrictModel):
 
 
 class Hypothesis(StrictModel):
-    statement: str = Field(min_length=1)
+    statement: str = Field(min_length=1, description="The hypothesis sentence itself.")
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     comparator_experiment_id: str = Field(min_length=1)
-    decision_policy_id: str = Field(min_length=1)
+    decision_policy_id: str = Field(min_length=1, description="Copy decision_rule.policy_id.")
     proposed_change: str = Field(min_length=1)
     predicted_metric_delta: float | None = Field(default=None, ge=-1, le=1)
 
 
+# Live models sometimes wrote ``hypothesis`` as a sentence, flattened its fields into the
+# candidate and left out ``experiment``; the descriptions below spell the nesting out.
 class Candidate(StrictModel):
     candidate_id: str = Field(min_length=1)
-    hypothesis: Hypothesis
-    experiment: ExperimentSpec
+    hypothesis: Hypothesis = Field(
+        description="An object, not a string: the sentence goes in hypothesis.statement, next to "
+        "evidence_refs, comparator_experiment_id, decision_policy_id, proposed_change and "
+        "predicted_metric_delta."
+    )
+    experiment: ExperimentSpec = Field(
+        description="Required for every candidate: the model, preprocessing and feature_actions "
+        "the program will train."
+    )
 
 
 class ProposalBatch(StrictModel):

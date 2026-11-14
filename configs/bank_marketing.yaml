@@ -31,7 +31,7 @@ llm:
   base_url: null             # or LLM_BASE_URL in .env; key only via LLM_API_KEY in .env
   output_mode: tool          # tool | native | prompted
   max_output_tokens: 3000
-  output_retries: 1
+  output_retries: 2           # schema-rejected outputs are re-asked twice before the round is lost
   timeout_seconds: 120
   input_price_per_mtok: null
   output_price_per_mtok: null

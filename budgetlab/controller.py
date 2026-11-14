@@ -54,6 +54,7 @@ from .proposers import (
     PydanticAICritic,
     PydanticAIProposer,
     build_context,
+    evidence_refs,
     load_dotenv,
 )
 from .provenance import code_version_label, environment_info, git_info
@@ -77,7 +78,6 @@ from .tasks import approved_features, get_task
 SYSTEMS = ("random_search", "budgetlab_no_schedule", "budgetlab")
 # Bump only for breaking changes to summary.json; see docs/INTERFACES.md section 1.
 SUMMARY_VERSION = 1
-EVIDENCE_EXTRAS = ("eda", "calibration", "scenario_card")
 
 
 def make_run_id(system: str) -> str:
@@ -490,6 +490,11 @@ def metered_call(
     if outcome.output is not None:
         output_ref = f"llm/{role}-r{round_index:02d}.output.json"
         atomic_write_json(ctx.run_dir / output_ref, outcome.output.model_dump(mode="json"))
+    transcript_ref = None
+    if outcome.transcript:
+        # Every message of a call the schema rejected at least once, so failures can be read.
+        transcript_ref = f"llm/{role}-r{round_index:02d}.transcript.json"
+        atomic_write_json(ctx.run_dir / transcript_ref, outcome.transcript)
     line = {
         "timestamp": utc_now(),
         "action_id": action_id,
@@ -503,6 +508,7 @@ def metered_call(
         "error": outcome.error,
         "context_ref": context_ref,
         "output_ref": output_ref,
+        "transcript_ref": transcript_ref,
     }
     with (ctx.run_dir / "llm_calls.jsonl").open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
@@ -523,7 +529,7 @@ def screen_candidates(
     ctx: RunContext, state: ResearchState, batch: ProposalBatch
 ) -> tuple[list[Candidate], list[dict[str, str]]]:
     known = set(state.known_ids())
-    allowed_refs = known | set(EVIDENCE_EXTRAS)
+    allowed_refs = set(evidence_refs(state))
     valid: list[Candidate] = []
     rejected: list[dict[str, str]] = []
     batch_hashes: set[str] = set()
@@ -686,6 +692,7 @@ def explore_loop(
             if critic_outcome.output is not None:
                 state.critic_advice = critic_outcome.output.model_dump(mode="json")
                 context["critic_advice"] = state.critic_advice
+                context["valid_evidence_refs"] = evidence_refs(state)
         record = RoundRecord(
             round_index=round_index,
             mode=mode,
@@ -705,7 +712,10 @@ def explore_loop(
         if batch is None:
             record.proposal_error = outcome.error
             state.empty_rounds += 1
-            state.feedback = [f"previous proposal failed: {outcome.error}"]
+            state.feedback = [f"previous proposal failed: {outcome.error}"] + [
+                f"schema error at {problem}"
+                for problem in outcome.details.get("validation_errors", [])
+            ]
             previous_error = True
             _write_round(ctx, record)
             continue
