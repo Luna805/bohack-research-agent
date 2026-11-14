@@ -768,7 +768,7 @@ def protocol_summary(run_id: str) -> None:
     line = f"目标列 {target.get('column', '?')} · {metric}"
     if excluded:
         line += f" · 不能用 {'、'.join(map(str, excluded))}"
-    with st.expander(f"研究方案已确认 · {line}"):
+    with st.expander(f"研究方案已确认 · {line}", key=f"protocol-summary-{run_id}"):
         st.write(f"**任务：** {card.get('title', run_id)}")
         st.write(f"**预测时点：** {card.get('prediction_time', '—')}")
         st.write(
@@ -801,7 +801,9 @@ def show_process(run_id: str, running: bool) -> None:
     done = [row for row in rows if row["kind"] != "run"]
     rounds = {row["round"] for row in done if isinstance(row["round"], int) and row["round"] > 0}
     with st.expander(
-        f"研究过程 · {len(done)} 次实验 · {len(rounds)} 轮", expanded=running or len(done) < 4
+        f"研究过程 · {len(done)} 次实验 · {len(rounds)} 轮",
+        expanded=running or len(done) < 4,
+        key=f"research-process-{run_id}",
     ):
         if not rows:
             st.caption("还没有完成的实验。")
@@ -816,7 +818,13 @@ def show_process(run_id: str, running: bool) -> None:
                 stage = row["source"]
             score = f"`{row['score']:.4f}`" if isinstance(row["score"], int | float) else ""
             color = STATUS_COLORS.get(row["kind"], "gray")
-            line = st.container(horizontal=True, vertical_alignment="center", gap="small")
+            line = st.container(
+                horizontal=True,
+                wrap=False,
+                vertical_alignment="top",
+                gap="small",
+                key=f"process-row-{run_id}-{row['id']}",
+            )
             with line:
                 st.markdown(
                     f"`{clock(row['elapsed'])}` **{stage}** {row['id']} {row['change']} "
@@ -1685,8 +1693,10 @@ if "file" in st.query_params:
 LLM_PROBLEM = llm_problem(ROOT)
 MODEL = (llm_overrides(ROOT).get("llm") or {}).get("model") or os.environ.get("LLM_MODEL") or "LLM"
 st.html("""<style>
-[data-testid="stMainBlockContainer"] {padding: 3.25rem .5rem .5rem; max-width: 100%;}
-[data-testid="stHeader"] {background: rgba(245, 246, 248, .9);}
+[data-testid="stMainBlockContainer"] {padding: 2.25rem .5rem .5rem; max-width: 100%;}
+[data-testid="stHeader"] {height: 2rem; min-height: 2rem; background: rgba(245, 246, 248, .9);}
+[data-testid="stToolbar"], [data-testid="stToolbar"] > div {height: 2rem;}
+[data-testid="stToolbar"] button {min-height: 1.75rem; height: 1.75rem;}
 .st-key-drawer_panel, .st-key-chat_panel, .st-key-ws_panel, .st-key-ws_panel_tall,
 .st-key-exp_panel, .st-key-exp_panel_closed {
   background: #FFFFFF; border: 1px solid #E4E7EC; border-radius: 12px;
@@ -1694,9 +1704,9 @@ st.html("""<style>
 }
 .st-key-drawer_panel, .st-key-chat_panel, .st-key-ws_panel, .st-key-ws_panel_tall,
 .st-key-exp_panel {flex: none !important;}
-.st-key-drawer_panel, .st-key-chat_panel {height: calc(100vh - 4rem) !important;}
-.st-key-ws_panel {height: calc(100vh - 4rem - 330px) !important;}
-.st-key-ws_panel_tall {height: calc(100vh - 4rem - 66px) !important;}
+.st-key-drawer_panel, .st-key-chat_panel {height: calc(100vh - 3rem) !important;}
+.st-key-ws_panel {height: calc(100vh - 3rem - 330px) !important;}
+.st-key-ws_panel_tall {height: calc(100vh - 3rem - 66px) !important;}
 .st-key-exp_panel {height: 318px !important;}
 /* Streamlit wraps nested containers; the wrapper takes the free height, the block scrolls. */
 [data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll),
@@ -1707,6 +1717,27 @@ st.html("""<style>
 }
 .st-key-chat_scroll, .st-key-ws_body, .st-key-exp_body, .st-key-history_list {
   height: 100% !important; overflow-y: auto !important; overflow-x: hidden;
+}
+/* Keep research details as compact as the workspace controls and file list. */
+:is([class*="st-key-protocol-summary-"], [class*="st-key-research-process-"])
+[data-testid="stExpanderDetails"] {padding: .5rem .75rem;}
+:is([class*="st-key-protocol-summary-"], [class*="st-key-research-process-"])
+[data-testid="stExpanderDetails"] [data-testid="stVerticalBlock"] {gap: .35rem;}
+:is([class*="st-key-protocol-summary-"], [class*="st-key-research-process-"])
+[data-testid="stExpanderDetails"] p {font-size: .875rem; line-height: 1.5; margin: 0;}
+/* Streamlit offsets the final paragraph margin; reset both sides together. */
+:is([class*="st-key-protocol-summary-"], [class*="st-key-research-process-"])
+[data-testid="stExpanderDetails"]
+:is([data-testid="stMarkdownContainer"], [data-testid="stCaptionContainer"]) {margin-bottom: 0;}
+[class*="st-key-process-row-"] {gap: .5rem !important;}
+[class*="st-key-process-row-"] > [data-testid="stElementContainer"]:not(:has(button)) {
+  flex: 1 1 0 !important; min-width: 0;
+}
+[class*="st-key-process-row-"] > [data-testid="stElementContainer"]:has(button) {
+  flex: 0 0 auto !important;
+}
+[class*="st-key-research-process-"] button {
+  min-height: 1.75rem; padding: 0 .25rem;
 }
 /* Project drawer: folders with their runs nested underneath, like a file tree. */
 .st-key-history_list {gap: .1rem !important;}
