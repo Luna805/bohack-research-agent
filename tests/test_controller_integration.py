@@ -80,7 +80,7 @@ def _fake_llm_proposer(calls: list[dict]):
                     "candidate_id": f"llm-{round_no}-{index}",
                     "hypothesis": {
                         "statement": f"Regularisation C={c_value} changes the fit.",
-                        "evidence_refs": [best, "not-a-real-ref"],
+                        "evidence_refs": [best, "eda"],
                         "comparator_experiment_id": best,
                         "decision_policy_id": "practical_gain_v2",
                         "proposed_change": f"C={c_value}",
