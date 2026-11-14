@@ -1,0 +1,118 @@
+"""Research workspace panels rendered from local run evidence."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import streamlit as st
+
+from budgetlab.ui.insights import (
+    branch_chart_spec,
+    branch_tree,
+    cycle_status,
+    experiment_rows,
+    explain_experiment,
+    read_json,
+    read_jsonl,
+    score_chart_spec,
+    token_ledger,
+)
+
+
+def render_token_panel(run_dir: Path | None) -> None:
+    st.markdown("#### Token 用量")
+    if run_dir is None:
+        with st.container(key="token_meter"):
+            st.markdown("## —")
+            st.caption("选择研究后查看")
+        return
+    ledger = token_ledger(run_dir)
+    used, unknown, limit = ledger["used"], ledger["unknown"], ledger["limit"]
+    with st.container(key="token_meter"):
+        st.markdown(f"## {used:,}")
+        st.caption(f"预算 {limit:,} · 未知 {unknown:,}")
+        if limit:
+            st.progress(min((used + unknown) / limit, 1.0), text="已记 + 未知 / 预算")
+        elif ledger["source"] == "scripted":
+            st.caption("脚本化提案 · 无 LLM 请求")
+    if unknown:
+        st.warning("有请求未返回完整 usage；未知用量单列，未当作 0 Token。")
+    with st.expander("查看过程用量"):
+        for label, role in (("提案", "proposer"), ("审查", "critic")):
+            role_data = ledger["by_role"].get(role, {})
+            st.write(f"{label} · {role_data.get('tokens', 0):,} Token")
+        st.caption("协议确认、程序实验和快捷问答均不调用 LLM。")
+    if ledger["by_round"]:
+        with st.expander(f"逐次调用明细（{len(ledger['by_round'])}）"):
+            st.dataframe(ledger["by_round"], hide_index=True, alt="每轮提案和审查的 Token 使用记录")
+
+
+def render_result_panel(run_dir: Path | None) -> None:
+    st.markdown("#### 验证结果")
+    if run_dir is None:
+        st.caption("选择研究后查看")
+        return
+    summary = read_json(run_dir / "summary.json")
+    evaluation = read_json(run_dir / "final_evaluation.json")
+    events = read_jsonl(run_dir / "events.jsonl")
+    rows = experiment_rows(run_dir, summary)
+    score = summary.get("delivered_dev_score")
+    if score is None and rows:
+        score = max(
+            (row["score"] for row in rows if isinstance(row.get("score"), (int, float))),
+            default=None,
+        )
+    st.metric(
+        "交付开发集分数" if summary else "当前探索最优分",
+        f"{score:.3f}" if score is not None else "—",
+    )
+    if rows:
+        st.echarts_chart(
+            score_chart_spec(rows, summary.get("delivered_experiment_id")),
+            height=240,
+            alt="各次实验的开发集分数，荧光绿点表示交付方案",
+        )
+        st.caption("开发集交叉验证 · 亮色为交付方案")
+    st.markdown("##### 研究闭环")
+    stages = cycle_status(events)
+    for index, (label, count) in enumerate(stages, start=1):
+        st.markdown(f"`{index:02d}`  **{label}**  ·  {count} 条记录")
+    if summary:
+        st.caption(f"确认状态：{summary.get('confirmation_status', '未知')}")
+        deltas = summary.get("confirmation_deltas") or []
+        if deltas:
+            st.caption("新切分复核差值：" + " / ".join(f"{value:+.3f}" for value in deltas))
+    if evaluation:
+        st.metric("Holdout（仅一次）", f"{evaluation.get('holdout_score'):.3f}")
+    else:
+        st.caption("Holdout：尚未评测。")
+
+
+def render_branch_map(run_dir: Path | None) -> None:
+    st.subheader("研究路径")
+    st.caption("悬停看结果 · 选择节点看依据")
+    if run_dir is None:
+        st.info("选择左侧研究记录，或启动一次研究后查看分岔。")
+        return
+    summary = read_json(run_dir / "summary.json")
+    rows = experiment_rows(run_dir, summary)
+    tree = branch_tree(rows, summary.get("delivered_experiment_id"))
+    if tree is None:
+        st.info("当前还没有可展示的实验，运行开始后会出现分岔。")
+        return
+    st.echarts_chart(
+        branch_chart_spec(tree),
+        height=540,
+        alt="研究实验分岔，荧光绿节点为交付方案，蓝色节点为通过门槛的方案",
+    )
+    st.caption("● 交付方案  ·  ● 达到门槛  ·  ● 其他尝试")
+    chosen = st.selectbox(
+        "查看节点说明",
+        [row["id"] for row in rows],
+        format_func=lambda experiment_id: f"实验 {experiment_id}",
+        key=f"branch-detail-{run_dir.name}",
+    )
+    row = next(row for row in rows if row["id"] == chosen)
+    st.info(explain_experiment(row, summary.get("delivered_experiment_id")))
+    if row.get("hypothesis"):
+        st.caption(f"原始假设：{row['hypothesis']}")
