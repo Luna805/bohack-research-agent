@@ -70,7 +70,7 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 完整规范在 [`AGENTS.md`](../AGENTS.md)，这里只列多人协作最容易出问题的几条：
 
 - **分支**：在 `<名字>/<主题>` 短分支上开发，合并前 `git pull --rebase origin main`；`main` 必须始终能跑演示。
-- **CI**：配置文件已写好（Ubuntu + Windows 上跑 lint 和测试），但**还没启用**：yirran 本机的 GitHub token 没有 `workflow` 权限，推送被拒。启用后 CI 是红的不合并。
+- **CI**：每次 push 都会在 Ubuntu 和 Windows 上跑 lint、格式检查和测试（GitHub → Actions → ci）；CI 是红的不合并。
 - **版本可追溯**：每个 run 的 `run_config.json` 自动记录 git 提交号和是否有未提交改动，报告头部也会显示 `code version`。正式结果必须来自无未提交改动（非 dirty）的提交。
 - **冻结**：正式矩阵开跑前打 tag `benchmark-freeze`，之后代码和配置不再改动。
 - **结果集中**：正式矩阵只在一台机器上跑，精简结果提交到 `results/<run_id>/`；PPT 里的数字只从这里取。
@@ -80,7 +80,7 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 
 | # | 任务 | 建议分工 | 负责人 | 状态 | 完成标准 |
 |---|---|---|---|---|---|
-| 0 | **启用 CI**：给 yirran 的 token 加上 `workflow` 权限后由我们推送；或由仓库所有者在网页上新建 `.github/workflows/ci.yml`（内容向 yirran 要） | 队长 | yirran | 进行中 | Actions 页面里 Ubuntu 和 Windows 两个任务都是绿的 |
+| 0 | **启用 CI** | 队长 | yirran | 完成（`560db9b`） | Actions 页面里 Ubuntu 和 Windows 两个任务都是绿的 |
 | 1 | **确认 LLM 来源**：主办方是否提供模型、Key 和额度，还是自费 | 队长 | – | 等待原文 | 有群公告或手册原文；定下模型名、Base URL、单价 |
 | 2 | 真实接口门禁：填 `.env`，配置里设正数的 LLM 预算，跑 `probe-llm` | A | – | 待认领 | Schema 一次通过，usage 有值；tool 模式不行就依次试 `native`、`prompted` |
 | 3 | 真实 LLM 跑 Bank：`--system budgetlab --proposer llm` | A | – | 待认领 | 至少 2 轮真实提案→训练→反馈；`llm_calls.jsonl` 的 Token 和 `budget.json` 对得上 |
@@ -112,8 +112,8 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 ### 2026-11-14 约 09:45–09:55 · yirran + Claude Code
 - 做了：`AGENTS.md` / `CLAUDE.md`、`results/` 目录约定；run 现在会记录 git 提交号、是否 dirty 和环境版本（`budgetlab/provenance.py`）。
 - 验证：本地 17 passed，ruff 通过。
-- 问题：CI 配置（`.github/workflows/ci.yml`）推送被拒，token 缺少 `workflow` 权限，文件暂时只在 yirran 本地。
-- 下一步：启用 CI（见第 4 节第 0 项）；确认 LLM 来源。
+- 问题：CI 配置首次推送被拒（token 缺少 `workflow` 权限）；给 token 加上权限后推送成功（`560db9b`），首次运行 Ubuntu 和 Windows 均通过。
+- 下一步：确认 LLM 来源。
 
 ### 2026-11-14 约 09:35–09:45 · yirran + Claude Code
 - 做了：本交接文档；修复 macOS/pyenv 下下载数据的 SSL 证书问题（`df5a0f3`）。
