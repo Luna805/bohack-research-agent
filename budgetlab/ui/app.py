@@ -1218,18 +1218,18 @@ def show_files(run_id: str, running: bool, highlight: set[str]) -> None:
     if entries is None:
         folder, entries = "", list_entries(RUNS, run_id) or []
     with st.container(horizontal=True, vertical_alignment="center"):
+        # No separate path row: inside a subfolder, the way back up sits in the filter row.
         if folder:
             parent = folder.rsplit("/", 1)[0] if "/" in folder else ""
             st.button(
-                "上一级",
+                folder.rsplit("/", 1)[-1],
                 key=f"files-up-{run_id}",
                 icon=":material/arrow_upward:",
                 type="tertiary",
+                help=f"当前在 {folder}/，点击返回上一级",
                 on_click=set_folder,
                 args=(run_id, parent),
             )
-        st.markdown(f"`runs / {run_id}" + (f" / {folder}`" if folder else "`"))
-    with st.container(horizontal=True, vertical_alignment="center"):
         query = st.text_input(
             "筛选文件名",
             key="files_filter",
@@ -1419,10 +1419,10 @@ def show_experiments(run_id: str, running: bool) -> None:
             {"label": "实验"},
             {"label": metric, "align": "right"},
             {"label": "较此前最优", "align": "right"},
-            {"label": "状态"},
+            {"label": "实验配置", "max": "18rem"},
             {"label": "来源"},
+            {"label": "状态"},
             {"label": "耗时(s)", "align": "right"},
-            {"label": "做了什么", "max": "18rem"},
         ],
         [
             {
@@ -1432,12 +1432,12 @@ def show_experiments(run_id: str, running: bool) -> None:
                     row["id"],
                     number_text(row["score"], ".4f"),
                     number_text(row["delta"], "+.4f"),
-                    row["status"],
-                    row["source"],
-                    number_text(row["seconds"], ".1f"),
                     row["change"] or MODEL_NAMES.get(row["model"], row["model"]),
+                    row["source"],
+                    row["status"],
+                    number_text(row["seconds"], ".1f"),
                 ],
-                "tones": [None, None, None, tones.get(row["kind"]), None, None, None],
+                "tones": [None, None, None, None, None, tones.get(row["kind"]), None],
             }
             for row in rows
         ],
@@ -1757,9 +1757,25 @@ st.html("""<style>
 .st-key-drawer_panel, .st-key-chat_panel, .st-key-ws_panel, .st-key-ws_panel_tall,
 .st-key-exp_panel {flex: none !important;}
 .st-key-drawer_panel, .st-key-chat_panel {height: calc(100vh - 4rem) !important;}
-.st-key-ws_panel {height: calc(100vh - 4rem - 330px) !important;}
+/* The workspace and the experiment panel share the right column; --exp-h is set by
+   dragging the gap between them (SPLITTER_JS) and is clamped so neither panel vanishes. */
+:root {--exp-h-used: clamp(120px, var(--exp-h, 318px), calc(100vh - 4rem - 172px));}
+.st-key-ws_panel {height: calc(100vh - 4rem - 12px - var(--exp-h-used)) !important;}
 .st-key-ws_panel_tall {height: calc(100vh - 4rem - 66px) !important;}
-.st-key-exp_panel {height: 318px !important;}
+.st-key-exp_panel {height: var(--exp-h-used) !important; position: relative;}
+.st-key-exp_panel::before {
+  content: ""; position: absolute; left: 50%; top: -9px; transform: translateX(-50%);
+  width: 40px; height: 4px; border-radius: 2px; background: #D0D5DD;
+}
+html.bl-split-hover .st-key-exp_panel::before,
+html.bl-split-drag .st-key-exp_panel::before {background: #2563EB;}
+html.bl-split-hover, html.bl-split-hover *, html.bl-split-drag, html.bl-split-drag * {
+  cursor: row-resize !important;
+}
+html.bl-split-drag * {user-select: none !important;}
+.st-key-splitter_js, [data-testid="stLayoutWrapper"]:has(> .st-key-splitter_js) {
+  display: none !important;
+}
 /* Streamlit wraps nested containers; the wrapper takes the free height, the block scrolls. */
 [data-testid="stLayoutWrapper"]:has(> .st-key-chat_scroll),
 [data-testid="stLayoutWrapper"]:has(> .st-key-ws_body),
@@ -1829,6 +1845,65 @@ st.html("""<style>
 [data-testid="stMetricLabel"] p {font-size: .85rem;}
 code {font-variant-numeric: tabular-nums;}
 </style>""")
+# Drag the gap between the workspace and the experiment panel to resize them; double-click
+# it to go back to the default. Listeners sit on the document, so Streamlit reruns that
+# rebuild the panels do not drop them, and the height is kept per browser.
+SPLITTER_JS = """<script>
+(() => {
+  if (window.__budgetlabSplitter) return;
+  window.__budgetlabSplitter = true;
+  const root = document.documentElement, KEY = "budgetlab.expPanelHeight";
+  const MIN_EXP = 120, MIN_WS = 160;
+  try {
+    const saved = parseInt(localStorage.getItem(KEY), 10);
+    if (saved > 0) root.style.setProperty("--exp-h", saved + "px");
+  } catch (e) {}
+  const panels = () => {
+    const ws = document.querySelector(".st-key-ws_panel");
+    const exp = document.querySelector(".st-key-exp_panel");
+    return ws && exp ? [ws.getBoundingClientRect(), exp.getBoundingClientRect()] : null;
+  };
+  const onGap = (e) => {
+    const p = panels();
+    if (!p) return false;
+    const [ws, exp] = p;
+    return e.clientX >= exp.left && e.clientX <= exp.right
+      && e.clientY >= ws.bottom - 3 && e.clientY <= exp.top + 3;
+  };
+  let drag = null;
+  document.addEventListener("pointermove", (e) => {
+    if (!drag) {
+      root.classList.toggle("bl-split-hover", onGap(e));
+      return;
+    }
+    const height = Math.min(drag.total - MIN_WS, Math.max(MIN_EXP, drag.height + drag.y - e.clientY));
+    root.style.setProperty("--exp-h", Math.round(height) + "px");
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !onGap(e)) return;
+    const [ws, exp] = panels();
+    drag = {y: e.clientY, height: exp.height, total: ws.height + exp.height};
+    root.classList.add("bl-split-drag");
+    e.preventDefault();
+  });
+  const stop = () => {
+    if (!drag) return;
+    drag = null;
+    root.classList.remove("bl-split-drag");
+    const p = panels();
+    try { if (p) localStorage.setItem(KEY, String(Math.round(p[1].height))); } catch (e) {}
+  };
+  document.addEventListener("pointerup", stop);
+  window.addEventListener("blur", stop);
+  document.addEventListener("dblclick", (e) => {
+    if (!onGap(e)) return;
+    root.style.removeProperty("--exp-h");
+    try { localStorage.removeItem(KEY); } catch (e) {}
+  });
+})();
+</script>"""
+with st.container(key="splitter_js"):
+    st.html(SPLITTER_JS, unsafe_allow_javascript=True)
 
 DEFAULTS = {"ws_tab": "文件", "page": "research", "panel_open": True, "drawer": True}
 for key, value in DEFAULTS.items():
