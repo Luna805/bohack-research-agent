@@ -131,6 +131,7 @@ class EvaluationRecord(StrictModel):
     fold_scores: tuple[float, ...] = ()
     confirmation_deltas: tuple[float, ...] = ()
     comparator_experiment_id: str | None = None
+    invalid_reason: str | None = None
     evidence_refs: tuple[str, ...] = Field(min_length=1)
     computed_by: Literal["evaluator"] = "evaluator"
 
@@ -276,6 +277,9 @@ class ExecutionResult(StrictModel):
     mean_score: float | None = None
     fit_attempts: int = Field(default=0, ge=0)
     fit_completed: int = Field(default=0, ge=0)
+    fold_hash: str | None = None
+    dataset_hash: str | None = None
+    metric: str | None = None
     duration_seconds: float = Field(default=0, ge=0)
     artifact_ref: str
     error: str | None = None

@@ -38,7 +38,7 @@ ruff check . && ruff format --check budgetlab tests
 
 - Python ≥ 3.11，带类型注解；代码、注释和日志用英文，文档用中文。
 - ruff 行宽 100；提交前必须跑 `pytest -q` 和 `ruff check .`。
-- 测试不能联网，也不能依赖 API Key。LLM 相关测试用 Pydantic AI 的 `FunctionModel`（参考 `tests/test_controller_integration.py`）；数据用 `data_root` fixture。
+- 测试不能联网，也不能依赖 API Key。LLM 相关测试用 Pydantic AI 的 `FunctionModel`（`tests/test_controller_integration.py`）或本地假 OpenAI 服务器（`tests/test_llm_http.py`）；数据用 `data_root` fixture。
 - CI（`.github/workflows/ci.yml`）会在每次 push 时于 Ubuntu 和 Windows 上跑 lint 和测试；CI 是红的就不要合进 `main`。修改 `.github/workflows/` 需要带 `workflow` 权限的 token。
 
 ## Git 与协作

@@ -1,6 +1,6 @@
 # BudgetLab 交接说明
 
-> 更新：2026-11-14 09:55（北京时间）· 提交截止 11/15 08:00
+> 更新：2026-11-14 10:10（北京时间）· 提交截止 11/15 08:00
 > 开发规范见仓库根目录 [`AGENTS.md`](../AGENTS.md)（人和 AI 代理共用，Claude Code 通过 `CLAUDE.md` 自动读取）。
 
 ## 0. 先做这几件事
@@ -25,7 +25,7 @@ ruff check .
 | W02 预算与账本 | ✅ | 新增 `Budget.can_reserve()`（只试算，不改状态）和 `remaining()` |
 | W03 数据与隔离 | ✅ | 任务适配器、场景卡、`prepare` 切出密封 holdout、开发集画像 `eda.json` |
 | W04/W05 实验与裁决 | ✅ | 夜间版本基础上，随机搜索覆盖了特征动作 |
-| W06 LLM 接入 | ⚠️ 代码完成 | Pydantic AI 提案器和 Critic，带预留与结算；只用本地 FunctionModel 测过，**没有真实请求过** |
+| W06 LLM 接入 | ⚠️ 代码完成 | Pydantic AI 提案器和 Critic，带预留与结算；走自建 httpx 客户端（SDK 重试关闭，usage 取自原始 HTTP 响应），已用本地假 OpenAI 服务器测过 tool/native/prompted 三种模式；**还没有对真实提供方请求过** |
 | W07 主循环 | ✅ | 两个候选、筛查与去重、便宜时都跑、停止规则、工具搜索调度、重规划、方向归因 |
 | W08 冻结与最终评测 | ✅ | `evaluate` 每个 run 只能评一次，第二次报错 |
 | W09 正式对照矩阵 | ❌ | 还没有批量运行和汇总脚本 |
@@ -108,6 +108,11 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 ## 6. 开发日志
 
 新的在最上面。每次工作结束追加一条（格式见 `AGENTS.md`），只写事实和证据。
+
+### 2026-11-14 约 09:55–10:10 · yirran + Claude Code
+- 做了：从另一位同事的独立实现（chier1 / research-agent）移植两项：① LLM 调用改走自建 httpx 客户端，`openai` 的 `max_retries=0`，按请求钩子计数，usage 取自原始响应，缺 usage 的请求按保守估计记为 unknown；新增 `tests/test_llm_http.py`（本地假 OpenAI 服务器）。② 配对比较前的证据检查：worker 输出折指纹（每折验证行 ID 的哈希）、数据哈希和指标；`evaluator.comparison_problem` 检查完整性、有限性、切分种子、折指纹、数据和指标，不通过即 `invalid` 并写明原因；确认阶段每个切分都走同一检查（`confirmation/split-<seed>.json`）。
+- 验证：33 passed，ruff 通过；Bank scripted run `20261114T020906Z-budgetlab-1725a4`：探索 12 个实验 0 个 invalid，三个确认切分均有效（Δ 0.067/0.071/0.066），confirmed_pass。
+- 备注：GitHub 上的 `research-agent-hyf` 分支是网页半截上传（只有对方的 tests/scripts/pyproject，缺少其 budgetlab 模块），不要合并。
 
 ### 2026-11-14 约 09:45–09:55 · yirran + Claude Code
 - 做了：`AGENTS.md` / `CLAUDE.md`、`results/` 目录约定；run 现在会记录 git 提交号、是否 dirty 和环境版本（`budgetlab/provenance.py`）。

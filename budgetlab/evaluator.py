@@ -1,18 +1,65 @@
+"""Program-side verdicts. Engineering thresholds, not significance tests.
+
+Every paired comparison first checks that both results are complete, finite and genuinely
+paired (same split seed, same validation rows per fold, same data and metric). A comparison
+that fails these checks is ``invalid`` with a concrete reason; it never counts as evidence
+for or against a hypothesis.
+"""
+
 from __future__ import annotations
 
+import math
 import statistics
 
 from .schemas import CalibrationReport, EvaluationRecord, ExecutionResult
 
 
+def result_problem(result: ExecutionResult, label: str = "result") -> str | None:
+    """Why a single result cannot serve as evidence, or None when it can."""
+    if result.status != "ok":
+        return f"{label}_{result.status}"
+    if not result.fold_scores or result.mean_score is None:
+        return f"{label}_missing_scores"
+    if any(not math.isfinite(s) or s < 0 or s > 1 for s in result.fold_scores):
+        return f"{label}_invalid_fold_score"
+    if not math.isclose(result.mean_score, statistics.mean(result.fold_scores), abs_tol=1e-9):
+        return f"{label}_mean_fold_mismatch"
+    if result.fit_completed != len(result.fold_scores):
+        return f"{label}_incomplete_fits"
+    return None
+
+
+def comparison_problem(candidate: ExecutionResult, comparator: ExecutionResult) -> str | None:
+    """Why two results are not a valid same-fold pair, or None when they are."""
+    for result, label in ((candidate, "candidate"), (comparator, "comparator")):
+        problem = result_problem(result, label)
+        if problem is not None:
+            return problem
+    if candidate.split_seed != comparator.split_seed:
+        return "split_seed_mismatch"
+    if len(candidate.fold_scores) != len(comparator.fold_scores):
+        return "fold_count_mismatch"
+    if candidate.fold_hash is None or candidate.fold_hash != comparator.fold_hash:
+        return "unpaired_folds"
+    if candidate.dataset_hash != comparator.dataset_hash:
+        return "dataset_mismatch"
+    if candidate.metric != comparator.metric:
+        return "metric_mismatch"
+    return None
+
+
 def calibrate(
     protocol_hash: str, results: list[ExecutionResult], min_effect_floor: float
 ) -> CalibrationReport:
-    if len(results) < 3 or any(result.status != "ok" for result in results):
-        raise ValueError("calibration requires at least three successful split results")
-    scores = tuple(float(result.mean_score) for result in results if result.mean_score is not None)
-    if len(scores) != len(results):
-        raise ValueError("calibration result is missing a score")
+    if len(results) < 3:
+        raise ValueError("calibration requires at least three split results")
+    for result in results:
+        problem = result_problem(result, result.experiment_id)
+        if problem is not None:
+            raise ValueError(f"invalid calibration result: {problem}")
+    if len({(r.dataset_hash, r.metric) for r in results}) != 1:
+        raise ValueError("calibration results disagree on data or metric")
+    scores = tuple(float(result.mean_score) for result in results)  # type: ignore[arg-type]
     noise_floor = statistics.stdev(scores)
     return CalibrationReport(
         protocol_hash=protocol_hash,
@@ -28,21 +75,21 @@ def evaluate_candidate(
 ) -> EvaluationRecord:
     """Paired same-fold comparison against ``baseline`` (any frozen comparator)."""
     evidence = (candidate.artifact_ref, baseline.artifact_ref)
-    if candidate.status != "ok" or baseline.status != "ok":
-        status = candidate.status if candidate.status != "ok" else baseline.status
+    problem = comparison_problem(candidate, baseline)
+    if problem is not None:
+        if candidate.status != "ok":
+            execution_status = candidate.status
+        elif baseline.status != "ok":
+            execution_status = baseline.status
+        else:
+            execution_status = "invalid"
         return EvaluationRecord(
             experiment_id=candidate.experiment_id,
-            execution_status=status,
+            execution_status=execution_status,
             policy_status="invalid",
+            mean_score=candidate.mean_score,
             comparator_experiment_id=baseline.experiment_id,
-            evidence_refs=evidence,
-        )
-    if len(candidate.fold_scores) != len(baseline.fold_scores):
-        return EvaluationRecord(
-            experiment_id=candidate.experiment_id,
-            execution_status="invalid",
-            policy_status="invalid",
-            comparator_experiment_id=baseline.experiment_id,
+            invalid_reason=problem,
             evidence_refs=evidence,
         )
     deltas = tuple(
@@ -70,13 +117,16 @@ def evaluate_confirmation(
     min_effect: float,
     min_positive_fraction: float,
     evidence_refs: tuple[str, ...],
+    *,
+    expected_splits: int = 3,
 ) -> EvaluationRecord:
-    if len(deltas) != 3:
+    if len(deltas) != expected_splits:
         return EvaluationRecord(
             experiment_id=experiment_id,
             execution_status="invalid",
             policy_status="inconclusive",
             confirmation_deltas=tuple(deltas),
+            invalid_reason=f"only {len(deltas)} of {expected_splits} confirmation splits valid",
             evidence_refs=evidence_refs,
         )
     median_delta = statistics.median(deltas)

@@ -11,6 +11,7 @@ compact context built by ``build_context`` from development-side facts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -35,6 +36,9 @@ from .schemas import (
     TaskContract,
 )
 from .state import ResearchState
+
+# PydanticAI prints an observability banner on first use; keep CLI and CI logs clean.
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
 # ------------------------------------------------------------------------------ context
 
@@ -351,7 +355,14 @@ class LLMSettings:
 
 
 class _PydanticAIRole:
-    """Shared plumbing: one Agent, strict output type, usage captured even on failure."""
+    """One strict-output LLM role.
+
+    Live calls go through our own ``httpx`` client so the controller sees every HTTP request:
+    SDK-level retries are switched off (``max_retries=0``), each request is counted by a
+    request hook, and token usage is read from the raw provider response. A request whose
+    response carries no usage is booked as unknown, never as free. When a PydanticAI test
+    ``model`` is injected (unit tests), the framework's usage counters are used instead.
+    """
 
     source = "llm"
 
@@ -363,41 +374,43 @@ class _PydanticAIRole:
         *,
         model: Any | None = None,
     ) -> None:
-        from pydantic_ai import Agent, NativeOutput, PromptedOutput, ToolOutput
-
         if model is None:
             if not settings.model_name:
                 raise RuntimeError("LLM model name is not configured (llm.model or LLM_MODEL)")
-            from pydantic_ai.models.openai import OpenAIChatModel
-            from pydantic_ai.providers.openai import OpenAIProvider
+            if not settings.api_key:
+                raise RuntimeError("LLM_API_KEY is not set in the environment or .env")
+        self.settings = settings
+        self.instructions = instructions
+        self.output_type = output_type
+        self._test_model = model
 
-            model = OpenAIChatModel(
-                settings.model_name,
-                provider=OpenAIProvider(base_url=settings.base_url, api_key=settings.api_key),
-            )
+    def _agent(self, model: Any) -> Any:
+        from pydantic_ai import Agent, NativeOutput, PromptedOutput, ToolOutput
+
         wrapped = {
             "tool": ToolOutput,
             "native": NativeOutput,
             "prompted": PromptedOutput,
-        }[settings.output_mode](output_type)
+        }[self.settings.output_mode](self.output_type)
         model_settings: dict[str, Any] = {
-            "max_tokens": settings.max_output_tokens,
-            "timeout": settings.timeout_seconds,
+            "max_tokens": self.settings.max_output_tokens,
+            "timeout": self.settings.timeout_seconds,
         }
-        if settings.temperature is not None:
-            model_settings["temperature"] = settings.temperature
-        self.settings = settings
-        self.instructions = instructions
-        self.agent = Agent(
+        if self.settings.temperature is not None:
+            model_settings["temperature"] = self.settings.temperature
+        return Agent(
             model,
             output_type=wrapped,
-            instructions=instructions,
-            retries=settings.output_retries,
+            instructions=self.instructions,
+            retries=self.settings.output_retries,
             model_settings=model_settings,
         )
 
+    def _prompt_tokens(self, context: dict[str, Any]) -> int:
+        return (len(json.dumps(context, ensure_ascii=False)) + len(self.instructions)) // 3
+
     def estimate(self, context: dict[str, Any]) -> ResourceVector:
-        prompt_tokens = (len(json.dumps(context, ensure_ascii=False)) + len(self.instructions)) // 3
+        prompt_tokens = self._prompt_tokens(context)
         attempts = self.settings.output_retries + 1
         return ResourceVector(
             llm_tokens=(prompt_tokens + self.settings.max_output_tokens) * attempts,
@@ -418,39 +431,102 @@ class _PydanticAIRole:
             + output_tokens * self.settings.output_price_per_mtok
         ) / 1_000_000
 
-    def _call(self, context: dict[str, Any]) -> CallOutcome:
+    def _limits(self) -> Any:
         from pydantic_ai import UsageLimits
+
+        return UsageLimits(request_limit=self.settings.output_retries + 1)
+
+    async def _run_http(self, prompt: str, trace: dict[str, Any]) -> Any:
+        import httpx
+        from openai import AsyncOpenAI
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        async def on_request(request: httpx.Request) -> None:
+            trace["requests"] += 1
+
+        async def on_response(response: httpx.Response) -> None:
+            await response.aread()
+            try:
+                usage = response.json().get("usage")
+            except (ValueError, AttributeError):
+                usage = None
+            trace["usages"].append(usage if isinstance(usage, dict) else None)
+
+        async with httpx.AsyncClient(
+            timeout=self.settings.timeout_seconds,
+            event_hooks={"request": [on_request], "response": [on_response]},
+        ) as http_client:
+            client = AsyncOpenAI(
+                api_key=self.settings.api_key,
+                base_url=self.settings.base_url,
+                max_retries=0,
+                timeout=self.settings.timeout_seconds,
+                http_client=http_client,
+            )
+            model = OpenAIChatModel(
+                self.settings.model_name, provider=OpenAIProvider(openai_client=client)
+            )
+            result = await self._agent(model).run(prompt, usage_limits=self._limits())
+            return result.output
+
+    def _call(self, context: dict[str, Any]) -> CallOutcome:
         from pydantic_ai.usage import RunUsage
 
-        usage = RunUsage()
+        prompt = json.dumps(context, ensure_ascii=False)
         started = time.monotonic()
         output = None
         error = None
+        trace: dict[str, Any] = {"requests": 0, "usages": []}
+        framework_usage = RunUsage()
         try:
-            result = self.agent.run_sync(
-                json.dumps(context, ensure_ascii=False),
-                usage=usage,
-                usage_limits=UsageLimits(request_limit=self.settings.output_retries + 1),
-            )
-            output = result.output
+            if self._test_model is not None:
+                result = self._agent(self._test_model).run_sync(
+                    prompt, usage=framework_usage, usage_limits=self._limits()
+                )
+                output = result.output
+            else:
+                output = asyncio.run(self._run_http(prompt, trace))
         except Exception as exc:  # provider, validation and limit failures all end the call
             error = f"{type(exc).__name__}: {str(exc)[:500]}"
-        tokens = int(usage.input_tokens or 0) + int(usage.output_tokens or 0)
+        if self._test_model is not None:
+            usage_source = "framework"
+            input_tokens = int(framework_usage.input_tokens or 0)
+            output_tokens = int(framework_usage.output_tokens or 0)
+            requests = int(framework_usage.requests or 0)
+            missing = 1 if error is not None and requests == 0 else 0
+        else:
+            usage_source = "http"
+            known = [
+                usage
+                for usage in trace["usages"]
+                if usage and "prompt_tokens" in usage and "completion_tokens" in usage
+            ]
+            input_tokens = sum(int(usage["prompt_tokens"]) for usage in known)
+            output_tokens = sum(int(usage["completion_tokens"]) for usage in known)
+            requests = int(trace["requests"])
+            missing = requests - len(known)
         actual = ResourceVector(
-            llm_tokens=tokens,
-            llm_requests=int(usage.requests or 0),
-            cost_usd=self._cost(int(usage.input_tokens or 0), int(usage.output_tokens or 0)),
+            llm_tokens=input_tokens + output_tokens,
+            llm_requests=requests,
+            cost_usd=self._cost(input_tokens, output_tokens),
         )
         unknown = ResourceVector()
-        if error is not None and usage.requests == 0:
-            # A request may have been sent without usage coming back: never book it as free.
-            unknown = ResourceVector(llm_requests=1, llm_tokens=self.settings.max_output_tokens)
+        if missing > 0:
+            # Requests whose usage never came back are charged at the conservative estimate.
+            per_request = self._prompt_tokens(context) + self.settings.max_output_tokens
+            unknown = ResourceVector(
+                llm_tokens=missing * per_request,
+                llm_requests=1 if usage_source == "framework" else 0,
+            )
         details = {
             "model": self.settings.model_name,
             "output_mode": self.settings.output_mode,
-            "input_tokens": int(usage.input_tokens or 0),
-            "output_tokens": int(usage.output_tokens or 0),
-            "requests": int(usage.requests or 0),
+            "usage_source": usage_source,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "requests": requests,
+            "requests_without_usage": max(missing, 0),
             "seconds": round(time.monotonic() - started, 2),
             "priced": self.settings.input_price_per_mtok is not None,
         }

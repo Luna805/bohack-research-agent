@@ -57,6 +57,8 @@ class ExperimentRecord:
             row["hypothesis_comparator"] = self.hypothesis_check.comparator_experiment_id
             row["hypothesis_verdict"] = self.hypothesis_check.policy_status
             row["delta_vs_hypothesis_comparator"] = _r(self.hypothesis_check.mean_paired_delta)
+        if self.vs_baseline is not None and self.vs_baseline.invalid_reason:
+            row["invalid_reason"] = self.vs_baseline.invalid_reason
         if self.result.error:
             row["error"] = self.result.error[:300]
         if self.hypothesis:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -118,18 +119,29 @@ class Runner:
             ResourceVector(experiments=1, fits=fit_attempts, seconds=duration),
             unknown=unknown,
         )
+        fold_scores = tuple(float(value) for value in raw.get("fold_scores", []))
+        mean_score = raw.get("mean_score")
+        error = raw.get("error")
+        if not all(math.isfinite(value) for value in fold_scores) or (
+            mean_score is not None and not math.isfinite(float(mean_score))
+        ):
+            status, fold_scores, mean_score = "invalid", (), None
+            error = "worker returned a non-finite score"
         result = ExecutionResult(
             experiment_id=experiment_id,
             purpose=purpose,
             status=status,
             split_seed=split_seed,
-            fold_scores=tuple(float(value) for value in raw.get("fold_scores", [])),
-            mean_score=raw.get("mean_score"),
+            fold_scores=fold_scores,
+            mean_score=mean_score,
             fit_attempts=fit_attempts,
             fit_completed=fit_completed,
+            fold_hash=raw.get("fold_hash"),
+            dataset_hash=raw.get("dataset_hash"),
+            metric=raw.get("metric"),
             duration_seconds=duration,
             artifact_ref=artifact_rel,
-            error=raw.get("error"),
+            error=error,
         )
         atomic_write_json(
             self.run_dir / artifact_rel,

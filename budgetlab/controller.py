@@ -840,20 +840,28 @@ def finalize(ctx: RunContext, state: ResearchState) -> dict[str, Any]:
                 experiment_id=f"confirm-baseline-{seed}",
             )
             confirmation_refs.extend([candidate_run.artifact_ref, baseline_run.artifact_ref])
-            if candidate_run.status == "ok" and baseline_run.status == "ok":
-                deltas = [
-                    a - b
-                    for a, b in zip(
-                        candidate_run.fold_scores, baseline_run.fold_scores, strict=True
-                    )
-                ]
-                confirmation_deltas.append(sum(deltas) / len(deltas))
+            # Same validity checks as exploration: complete, finite, genuinely paired folds.
+            split_check = evaluate_candidate(
+                candidate_run, baseline_run, contract.decision_policy.min_effect
+            )
+            split_ref = f"confirmation/split-{seed}.json"
+            atomic_write_json(ctx.run_dir / split_ref, split_check.model_dump(mode="json"))
+            confirmation_refs.append(split_ref)
+            if split_check.policy_status == "invalid":
+                ctx.ledger.append(
+                    "confirmation_split_invalid",
+                    artifact_ref=split_ref,
+                    reason_code=split_check.invalid_reason,
+                )
+                continue
+            confirmation_deltas.append(split_check.mean_paired_delta)  # type: ignore[arg-type]
         confirmation = evaluate_confirmation(
             finalist.experiment_id,
             confirmation_deltas,
             contract.decision_policy.min_effect,
             contract.decision_policy.min_positive_fraction,
             tuple(confirmation_refs),
+            expected_splits=len(contract.decision_policy.confirmation_split_seeds),
         )
         atomic_write_json(ctx.run_dir / "confirmation.json", confirmation.model_dump(mode="json"))
         ctx.ledger.append("confirmation_completed", artifact_ref="confirmation.json")

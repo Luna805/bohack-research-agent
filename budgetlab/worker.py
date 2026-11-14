@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
+from .contracts import stable_hash
 from .data import load_development
 from .ledger import atomic_write_json
 from .pipeline import build_pipeline, score_predictions
@@ -19,6 +20,9 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
     started = time.monotonic()
     fit_attempts = 0
     fit_completed = 0
+    fold_hash = None
+    dataset_hash = None
+    metric = None
     if payload.get("simulate_sleep_seconds"):
         time.sleep(float(payload["simulate_sleep_seconds"]))
     try:
@@ -28,6 +32,8 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
         if bundle.dataset_hash != contract.dataset_hash:
             raise ValueError("development data hash does not match the frozen contract")
         features = bundle.features[list(contract.approved_feature_columns)]
+        dataset_hash = bundle.dataset_hash
+        metric = contract.primary_metric
         purpose = str(payload["purpose"])
         if purpose == "final_refit":
             fit_attempts = 1
@@ -42,7 +48,10 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
             seed = int(payload["split_seed"])
             splitter = StratifiedKFold(n_splits=contract.cv_folds, shuffle=True, random_state=seed)
             fold_scores = []
-            for fold_index, (train, valid) in enumerate(splitter.split(features, bundle.target)):
+            splits = list(splitter.split(features, bundle.target))
+            # Fingerprint of which rows validate in each fold; paired comparisons require equality.
+            fold_hash = stable_hash([[bundle.row_ids[i] for i in valid] for _, valid in splits])
+            for fold_index, (train, valid) in enumerate(splits):
                 pipeline = build_pipeline(
                     spec, features.iloc[train], contract.search_training_seed + fold_index
                 )
@@ -63,6 +72,9 @@ def execute(payload: dict[str, object]) -> dict[str, object]:
             "mean_score": float(np.mean(fold_scores)) if fold_scores else None,
             "fit_attempts": fit_attempts,
             "fit_completed": fit_completed,
+            "fold_hash": fold_hash,
+            "dataset_hash": dataset_hash,
+            "metric": metric,
             "duration_seconds": time.monotonic() - started,
             "error": None,
         }
