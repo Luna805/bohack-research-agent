@@ -22,6 +22,11 @@ def test_scripted_loop_real_training_holdout_reproduce_and_replay(
     assert summary["stop_reason"] in {"max_rounds", "diminishing_returns", "no_valid_candidates"}
     assert (run_dir / "delivery" / "model.joblib").exists()
     assert (run_dir / "rounds" / "round-01.json").exists()
+    run_config = json.loads((run_dir / "run_config.json").read_text(encoding="utf-8"))
+    assert run_config["environment"]["packages"]["scikit-learn"]
+    if run_config["git"] is not None:  # absent only in a source export without .git
+        assert len(run_config["git"]["commit"]) == 40
+        assert summary["code_version"].startswith(run_config["git"]["short"])
     record = json.loads((run_dir / "experiments" / "r01-c1.json").read_text(encoding="utf-8"))
     assert record["hypothesis_check"]["computed_by"] == "evaluator"
     assert record["vs_baseline"]["comparator_experiment_id"] == "baseline"

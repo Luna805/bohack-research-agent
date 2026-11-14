@@ -57,6 +57,7 @@ from .proposers import (
     build_context,
     load_dotenv,
 )
+from .provenance import code_version_label, environment_info, git_info
 from .reporting import write_report
 from .runner import PROJECT_ROOT, Runner
 from .schemas import (
@@ -212,6 +213,8 @@ def setup_run(
             "system": system,
             "proposal_source": proposal_source,
             "data_root": str(data_root.resolve()),
+            "git": git_info(PROJECT_ROOT),
+            "environment": environment_info(),
         },
     )
     ledger.append(
@@ -915,13 +918,14 @@ def _summary(
             key = record.hypothesis_check.policy_status
             hypothesis_verdicts[key] = hypothesis_verdicts.get(key, 0) + 1
     budget = ctx.budget.summary()
+    run_config = json.loads((ctx.run_dir / "run_config.json").read_text(encoding="utf-8"))
     return {
         "run_id": ctx.run_id,
         "system": ctx.system,
         "task_id": ctx.contract.task_id,
-        "proposal_source": json.loads(
-            (ctx.run_dir / "run_config.json").read_text(encoding="utf-8")
-        )["proposal_source"],
+        "code_version": code_version_label(run_config.get("git")),
+        "git": run_config.get("git"),
+        "proposal_source": run_config["proposal_source"],
         "primary_metric": ctx.contract.primary_metric,
         "min_effect": ctx.contract.decision_policy.min_effect,
         "baseline_score": state.baseline.result.mean_score,

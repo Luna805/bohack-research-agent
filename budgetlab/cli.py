@@ -130,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
             for key in (
                 "run_id",
                 "system",
+                "code_version",
                 "proposal_source",
                 "baseline_score",
                 "exploration_best_score",

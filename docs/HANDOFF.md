@@ -1,18 +1,19 @@
 # BudgetLab 交接说明
 
-> 更新：2026-11-14 09:40（北京时间）· 对应提交 `05c008b` · 提交截止 11/15 08:00
+> 更新：2026-11-14 09:55（北京时间）· 提交截止 11/15 08:00
+> 开发规范见仓库根目录 [`AGENTS.md`](../AGENTS.md)（人和 AI 代理共用，Claude Code 通过 `CLAUDE.md` 自动读取）。
 
 ## 0. 先做这几件事
 
 ```bash
-git pull                                         # 夜间代码已作为 7108d57 提交，今天的改动在 05c008b
+git pull                                         # 夜间代码在 7108d57，之后的改动见下方开发日志
 uv sync --frozen --extra dev --extra llm         # 锁文件新增了 openai 依赖
 python -m budgetlab.cli prepare --task bank_marketing   # 下载 UCI 数据，切出密封 holdout（约 1 MB）
 python -m pytest -q                              # 应为 17 passed
 ruff check .
 ```
 
-- 如果夜间版本之后你本地又改过 `controller.py`、`tests/conftest.py`，或者改过已删除的 `llm.py`，pull 时会冲突。冲突时以 `05c008b` 为准，把你的改动重新加上去。
+- 如果夜间版本之后你本地又改过 `controller.py`、`tests/conftest.py`，或者改过已删除的 `llm.py`，pull 时会冲突。冲突时以仓库版本为准，把你的改动重新加上去。
 - `prepare` 用 urllib 下载，证书优先用 certifi 的（某些 macOS/pyenv 的 Python 缺系统证书）。如果需要代理，先设置 `HTTPS_PROXY`。下载失败时报错信息会给出手动下载的步骤：把 `bank-additional-full.csv` 放到 `data/raw/bank_marketing/bank-additional/` 下即可，程序会校验文件哈希。
 - 以上命令已在干净的检出里验证过（uv sync → prepare → 17 passed → ruff 通过）。
 
@@ -64,60 +65,31 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 
 三个系统：`random_search`（0 Token）、`budgetlab_no_schedule`（消融组：只有提案循环 + 去重 + 预算 + 停止规则）、`budgetlab`（在此基础上加工具搜索调度、重规划和按需 Critic）。
 
-## 3. 开发规范
+## 3. 开发规范与协作约定
 
-### 3.1 不能破坏的约束
+完整规范在 [`AGENTS.md`](../AGENTS.md)，这里只列多人协作最容易出问题的几条：
 
-1. **LLM 只提案**。指标、裁决（`candidate_pass` / `not_met` / `confirmed_pass`）、晋级和停止都由程序计算；LLM 的输出类型里不能出现这些字段。
-2. **holdout 只在 `budgetlab/evaluation/` 里读**。研究代码只用 `load_development()`；每个 run 冻结交付后才 `evaluate` 一次。
-3. **所有资源都走预算**。训练由 `Runner.execute` 预留和结算；LLM 调用必须经过 `controller.metered_call`。没有返回 usage 的失败请求记为 unknown，不能记成 0。
-4. **契约在第一次提案前冻结**（`contract.json`）。之后不能修改 `min_effect`、切分、合法列和预算。
-5. **字段可用性只看场景卡**。不要在代码里硬编码"删掉 duration"这类规则。
-6. **不能静默改实验**。规格不合法就拒绝并给出原因，不能偷偷降级或改参数后再跑。
-7. **每个结论都要能回溯**。新写的产物用 `atomic_write_json`，并追加一条 ledger 事件。
-8. **标注要诚实**。`scripted` 不能说成 LLM；没测过的能力不写进 README 和 PPT。
-
-### 3.2 常见改动的检查清单
-
-**新增特征动作**（例如分箱）需要同时改 5 处：`schemas.py` 的联合类型 → `contracts.validate_experiment_spec` → `pipeline.apply_feature_actions` → `search.SpecSampler._actions`（保证和随机搜索同一空间）→ `proposers.build_context` 的 `legal_space`，再补测试。
-
-**新增任务**：在 `tasks/__init__.py` 加 `TaskDefinition` 和 loader，写 `cards/<task>.yaml`（每个字段都要有 `availability`），再 `prepare`。
-
-**改循环策略或预算**：改 `configs/*.yaml`，不要改代码里的默认值。正式对照开跑后不再改配置。
-
-### 3.3 代码风格与测试
-
-- Python ≥ 3.11，带类型注解；代码、注释和日志用英文，文档用中文。
-- `ruff check .` 和 `ruff format`（行宽 100）。
-- 测试不能联网，也不能依赖 API Key。LLM 相关测试用 Pydantic AI 的 `FunctionModel`，参考 `tests/test_controller_integration.py`；数据用 `data_root` fixture（会把乳腺癌数据 prepare 到临时目录）。
-- 提交前必须跑 `pytest -q` 和 `ruff check .`。
-
-### 3.4 Git
-
-- 开工前 `git pull --rebase`，小步提交，提交信息用英文祈使句（如 `Add benchmark runner`）。
-- 下面这些不要提交：`data/`、`runs/`、`.env`、`.venv/`（已在 `.gitignore` 里）。
-- 换行符由 `.gitattributes` 统一成 LF，Windows 上不用额外处理。
-- 为避免冲突，按文件分工（下一节）。要改对方负责的文件，先在群里说一声。
-
-### 3.5 运行与产物
-
-- 每次 run 写到 `runs/<UTC时间>-<系统>-<随机后缀>/`。目录说明见 README 的 "Run directory"。
-- 演示和对照只用 Bank Marketing，`night_smoke.yaml` 只用来检查管道是否通。
-- 一个 Bank run 大约 1.5–3.5 分钟，加上 LLM 调用会更久。
+- **分支**：在 `<名字>/<主题>` 短分支上开发，合并前 `git pull --rebase origin main`；`main` 必须始终能跑演示。
+- **CI**：配置文件已写好（Ubuntu + Windows 上跑 lint 和测试），但**还没启用**：yirran 本机的 GitHub token 没有 `workflow` 权限，推送被拒。启用后 CI 是红的不合并。
+- **版本可追溯**：每个 run 的 `run_config.json` 自动记录 git 提交号和是否有未提交改动，报告头部也会显示 `code version`。正式结果必须来自无未提交改动（非 dirty）的提交。
+- **冻结**：正式矩阵开跑前打 tag `benchmark-freeze`，之后代码和配置不再改动。
+- **结果集中**：正式矩阵只在一台机器上跑，精简结果提交到 `results/<run_id>/`；PPT 里的数字只从这里取。
+- **认领**：开始做某项待办前，在下表填上负责人并把状态改成"进行中"，然后推送，或者至少在群里说一声。
 
 ## 4. 接下来做什么（按优先级）
 
-| # | 任务 | 建议负责 | 完成标准 |
-|---|---|---|---|
-| 1 | **确认 LLM 来源**：主办方是否提供模型、Key 和额度，还是自费 | 队长 | 有群公告或手册原文；定下模型名、Base URL、单价 |
-| 2 | 真实接口门禁：填 `.env`，配置里设正数的 LLM 预算，跑 `probe-llm` | A | Schema 一次通过，usage 有值；tool 模式不行就依次试 `native`、`prompted` |
-| 3 | 真实 LLM 跑 Bank：`--system budgetlab --proposer llm` | A | 至少 2 轮真实提案→训练→反馈；`llm_calls.jsonl` 的 Token 和 `budget.json` 对得上 |
-| 4 | 对照矩阵脚本 `budgetlab/benchmark.py`：系统 × 重复次数，跑完统一 `evaluate`，汇总表格和曲线 | B | 默认 3 个系统 × 3 次；输出 CSV/MD 表，以及"最优分—累计 Token""最优分—时间"两张图 |
-| 5 | 只读展示页（Streamlit 或静态 HTML），读 `runs/` | B | 三个区域：实时轨迹、性能与成本、证据链；回放模式要有明显标识 |
-| 6 | README、PPT、录屏 | 全员 | 数字全部来自 `summary.json` / `final_evaluation.json` |
-| P1 | 协议理解轨道：给 LLM 不带可用性标注的字段表，让它提出排除列，程序对照场景卡打分 | A | 记录首次正确率和成本；这是展示"理解业务约束"最便宜的一步 |
-| P1 | `LLMSettings` 支持 `extra_body`（用来关闭思考模式） | A | 选定的模型需要时再做 |
-| P1 | MLE-bench 两道题的门禁，最多试 1 小时 | B | 过不了就放弃，报告里如实说明 |
+| # | 任务 | 建议分工 | 负责人 | 状态 | 完成标准 |
+|---|---|---|---|---|---|
+| 0 | **启用 CI**：给 yirran 的 token 加上 `workflow` 权限后由我们推送；或由仓库所有者在网页上新建 `.github/workflows/ci.yml`（内容向 yirran 要） | 队长 | yirran | 进行中 | Actions 页面里 Ubuntu 和 Windows 两个任务都是绿的 |
+| 1 | **确认 LLM 来源**：主办方是否提供模型、Key 和额度，还是自费 | 队长 | – | 等待原文 | 有群公告或手册原文；定下模型名、Base URL、单价 |
+| 2 | 真实接口门禁：填 `.env`，配置里设正数的 LLM 预算，跑 `probe-llm` | A | – | 待认领 | Schema 一次通过，usage 有值；tool 模式不行就依次试 `native`、`prompted` |
+| 3 | 真实 LLM 跑 Bank：`--system budgetlab --proposer llm` | A | – | 待认领 | 至少 2 轮真实提案→训练→反馈；`llm_calls.jsonl` 的 Token 和 `budget.json` 对得上 |
+| 4 | 对照矩阵脚本 `budgetlab/benchmark.py`：系统 × 重复次数，跑完统一 `evaluate`，汇总表格和曲线 | B | – | 待认领 | 默认 3 个系统 × 3 次；输出 CSV/MD 表，以及"最优分—累计 Token""最优分—时间"两张图 |
+| 5 | 只读展示页（Streamlit 或静态 HTML），读 `results/` 和 `runs/` | B | – | 待认领 | 三个区域：实时轨迹、性能与成本、证据链；回放模式要有明显标识 |
+| 6 | README、PPT、录屏 | 全员 | – | 待认领 | 数字全部来自 `summary.json` / `final_evaluation.json` |
+| P1 | 协议理解轨道：给 LLM 不带可用性标注的字段表，让它提出排除列，程序对照场景卡打分 | A | – | 待认领 | 记录首次正确率和成本；这是展示"理解业务约束"最便宜的一步 |
+| P1 | `LLMSettings` 支持 `extra_body`（用来关闭思考模式） | A | – | 待认领 | 选定的模型需要时再做 |
+| P1 | MLE-bench 两道题的门禁，最多试 1 小时 | B | – | 待认领 | 过不了就放弃，报告里如实说明 |
 
 建议分工：**A（控制器与模型）**负责 `controller.py`、`proposers.py`、`state.py`、`budget.py`；**B（数据、评测与展示）**负责 `tasks/`、`data.py`、`evaluation/`、`search.py`、新增的 `benchmark.py`、`ui/`。
 
@@ -132,3 +104,28 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 - 工具搜索的实验 ID（`tool-NN`）按实验总数编号，所以不连续，这是正常的。
 - 训练运行在带超时的子进程里，这不是操作系统层面的沙箱，对外不要说成"安全沙箱"。
 - `contracts.validate_proposal_batch` 只在测试里用到；主循环的筛查逻辑在 `controller.screen_candidates`。
+
+## 6. 开发日志
+
+新的在最上面。每次工作结束追加一条（格式见 `AGENTS.md`），只写事实和证据。
+
+### 2026-11-14 约 09:45–09:55 · yirran + Claude Code
+- 做了：`AGENTS.md` / `CLAUDE.md`、`results/` 目录约定；run 现在会记录 git 提交号、是否 dirty 和环境版本（`budgetlab/provenance.py`）。
+- 验证：本地 17 passed，ruff 通过。
+- 问题：CI 配置（`.github/workflows/ci.yml`）推送被拒，token 缺少 `workflow` 权限，文件暂时只在 yirran 本地。
+- 下一步：启用 CI（见第 4 节第 0 项）；确认 LLM 来源。
+
+### 2026-11-14 约 09:35–09:45 · yirran + Claude Code
+- 做了：本交接文档；修复 macOS/pyenv 下下载数据的 SSL 证书问题（`df5a0f3`）。
+- 验证：干净检出里依次跑通 `uv sync --frozen` → `prepare` → 17 passed → ruff 通过。
+
+### 2026-11-14 约 09:05–09:30 · yirran + Claude Code
+- 做了：Bank Marketing 适配器和场景卡、密封 holdout、数据画像、多轮主循环（三种系统）、Pydantic AI 提案器和 Critic 的计量、一次性 holdout 评测（`05c008b`）。
+- 验证：17 passed；Bank 数据上 random_search 的 holdout 为 0.713，budgetlab（scripted）为 0.710，两者都是 confirmed_pass。
+- 问题：脚本化提案器和随机搜索打平（预期之中）；还没有真实 LLM 请求。
+- 决策：holdout 用文件隔离（`data/sealed/`）；单次实验便宜时两个候选都跑；新增 `sentinel_to_missing` 特征动作。
+
+### 2026-11-14 00:55–01:13 · 夜间无人值守代理（Luna805 发起）
+- 做了：确定性引擎（W01–W05、W08），14 个测试；详见 `docs/night-run/STATUS.md`、`DECISIONS.md`、`BLOCKERS.md`（`7108d57`）。
+- 问题：API 预算为 0，所以没有接入真实 LLM；数据用的是乳腺癌冒烟数据集。
+

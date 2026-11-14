@@ -51,6 +51,7 @@ def write_report(run_dir: Path, summary: dict[str, Any]) -> Path:
         f"- primary metric: `{summary['primary_metric']}` (development 5-fold CV); "
         f"frozen min_effect = {_fmt(summary['min_effect'])}",
         f"- stop reason: `{summary['stop_reason']}` · wall time: {summary['wall_seconds']} s",
+        f"- code version: `{summary.get('code_version', 'unknown')}`",
         "",
         "## Result",
         "",
