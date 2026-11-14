@@ -1,21 +1,21 @@
 # BudgetLab 交接说明
 
-> 更新：2026-11-14 10:40（北京时间）· 提交截止 11/15 08:00
+> 更新：2026-11-14 12:35（北京时间）· main = `5c304ea`· 提交截止 11/15 08:00
 > 开发规范见仓库根目录 [`AGENTS.md`](../AGENTS.md)（人和 AI 代理共用，Claude Code 通过 `CLAUDE.md` 自动读取）。
 
 ## 0. 先做这几件事
 
 ```bash
-git pull                                         # 夜间代码在 7108d57，之后的改动见下方开发日志
-uv sync --frozen --extra dev --extra llm         # 锁文件新增了 openai 依赖
+git pull                                         # main = 5c304ea
+uv sync --frozen --extra dev --extra llm --extra ui   # ui 用于对话页（streamlit、plotly）
 python -m budgetlab.cli prepare --task bank_marketing   # 下载 UCI 数据，切出密封 holdout（约 1 MB）
-python -m pytest -q                              # 应为 17 passed
+python -m pytest -q                              # 应为 52 passed（锁定环境，含 ui 依赖）
 ruff check .
 ```
 
 - 如果夜间版本之后你本地又改过 `controller.py`、`tests/conftest.py`，或者改过已删除的 `llm.py`，pull 时会冲突。冲突时以仓库版本为准，把你的改动重新加上去。
 - `prepare` 用 urllib 下载，证书优先用 certifi 的（某些 macOS/pyenv 的 Python 缺系统证书）。如果需要代理，先设置 `HTTPS_PROXY`。下载失败时报错信息会给出手动下载的步骤：把 `bank-additional-full.csv` 放到 `data/raw/bank_marketing/bank-additional/` 下即可，程序会校验文件哈希。
-- 以上命令已在干净的检出里验证过（uv sync → prepare → 17 passed → ruff 通过）。
+- 以上命令已在干净的检出里验证过（uv sync → prepare → 测试 → ruff 通过）。对话页：`streamlit run budgetlab/ui/app.py`。
 
 ## 1. 现在到哪一步了
 
@@ -28,18 +28,24 @@ ruff check .
 | W06 LLM 接入 | ⚠️ 代码完成 | Pydantic AI 提案器和 Critic，带预留与结算；走自建 httpx 客户端（SDK 重试关闭，usage 取自原始 HTTP 响应），已用本地假 OpenAI 服务器测过 tool/native/prompted 三种模式；**还没有对真实提供方请求过** |
 | W07 主循环 | ✅ | 两个候选、筛查与去重、便宜时都跑、停止规则、工具搜索调度、重规划、方向归因 |
 | W08 冻结与最终评测 | ✅ | `evaluate` 每个 run 只能评一次，第二次报错 |
-| W09 正式对照矩阵 | ❌ | 还没有批量运行和汇总脚本 |
-| W10 展示与材料 | ❌ | 只有 `report.md`，没有 UI 和 PPT |
-| P1 经验库 / 自定义特征 / MLE-bench | ❌ | 未开始 |
+| W09 正式对照矩阵 | ⚠️ 准备完成 | 矩阵脚本 `python -m budgetlab.benchmark`（串行、逐个 holdout 评测、可续跑、final 要求代码干净、LLM 开跑前检查）；`configs/benchmark/final.yaml`（LLM）和 `final-scripted.yaml`（备用）为草稿；**正式运行在 20:00** |
+| W10 展示与材料 | ⚠️ 进行中 | 对话页第一版已合入（`budgetlab/ui/app.py`：示例任务、后台运行、0 Token 快捷问答）；CSV 上传、开放问答、PPT 未完成 |
+| 第二个任务 | ✅ | UCI Adult（改为不做 MLE-bench），`configs/adult.yaml` |
+| 通用 CSV 上传 | ✅ | `budgetlab/tasks/csv_task.py`；原始 Bank CSV 上传后的结果与内置任务完全一致 |
+| P1 经验库 / 自定义特征 | ❌ | 未开始 |
 
-**实测（Bank Marketing，f1_macro，提案器为脚本化规则，不是 LLM）：**
+**开发矩阵实测（f1_macro，脚本化提案，不是 LLM，各 1 次重复，机器空闲时运行）：**
 
-| 系统 | 基线 | 探索最优 | 确认 | holdout | 实验数 | 耗时 |
-|---|---|---|---|---|---|---|
-| random_search | 0.641 | 0.710 | confirmed_pass | 0.713 | 18 | 204 s |
-| budgetlab（scripted） | 0.641 | 0.710 | confirmed_pass | 0.710 | 14 | 98 s |
+| 任务 | 系统 | 基线 | holdout | 实验数 | 墙钟 |
+|---|---|---|---|---|---|
+| Bank | random_search | 0.6412 | 0.7099 | 18 | 97 s |
+| Bank | budgetlab_no_schedule | 0.6412 | 0.7099 | 8 | 69 s |
+| Bank | budgetlab | 0.6412 | 0.7099 | 12 | 82 s |
+| Adult | random_search | 0.7792 | 0.8143 | 18 | 164 s |
+| Adult | budgetlab_no_schedule | 0.7792 | 0.7941 | 6 | 135 s |
+| Adult | budgetlab | 0.7792 | 0.8151 | 8 | 145 s |
 
-最优方案是带 `class_weight=balanced` 的随机森林。脚本化规则本质上也是一种搜索，和随机搜索打平在预期之中；能否拉开差距，要看真实 LLM 的结果。单次 5 折实验 1–10 秒，两个候选都会跑。
+Bank 的结果在 `results/dev-20261114T030336Z/`；Adult 那次运行的代码还没提交，所以结果没有入库。脚本化规则是照着 Bank 写的，在 Adult 上靠调度触发的随机搜索兜底。这些只证明管道能用，**不是成绩**；能否拉开差距，要看真实 LLM。
 
 ## 2. 代码地图
 
@@ -58,8 +64,13 @@ budgetlab/
   proposers.py           build_context、提示词、ScriptedProposer、PydanticAIProposer/Critic
   controller.py          setup → explore（3 种系统）→ finalize；metered_call 包住每次 LLM 调用
   evaluation/            唯一读取 data/sealed/ 的代码
+  benchmark.py           对照矩阵（C）：python -m budgetlab.benchmark --matrix configs/benchmark/<名字>.yaml
+  tasks/csv_task.py      通用 CSV 上传（C）：validate / register / config_for_upload
+  ui/app.py、qa/         对话页与证据工具、快捷问答（D）
   reporting.py / cli.py  报告模板；命令行 prepare / research / evaluate / probe-llm / reproduce / replay
 configs/bank_marketing.yaml   正式开发配置（预算、循环策略、LLM 设置都在这里）
+configs/adult.yaml            第二个任务
+configs/benchmark/            dev.yaml（两个任务的开发矩阵）、final.yaml、final-scripted.yaml
 configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 ```
 
@@ -77,22 +88,29 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 
 ## 4. 待办状态（协调人维护）
 
+角色认领情况：C = yirran（兼协调人）；D = chier1（`d-ui` 已提交）；**A、B 尚未确认**。
+
 | # | 任务 | 角色 | 负责人 | 状态 | 完成标准 |
 |---|---|---|---|---|---|
-| 0 | 启用 CI | 协调人 | yirran | 完成（`560db9b`） | Ubuntu 和 Windows 两个任务都是绿的 |
-| 1 | **确认 LLM 来源**：主办方是否提供模型、Key 和额度，还是自费 | 协调人 | – | 等待原文 | 有群公告或手册原文；定下模型名、Base URL、单价 |
+| 0 | 启用 CI | 协调人 | yirran | ✅ `560db9b` | Ubuntu 和 Windows 两个任务都是绿的 |
+| 1 | **确认 LLM 来源**：主办方是否提供模型、Key 和额度，还是自费 | 协调人 + A | – | ⏳ 等待原文 | 有群公告或手册原文；定下模型名、Base URL、单价 |
 | 2 | 真实接口门禁：`probe-llm` | A | – | 待认领 | Schema 一次通过，usage 有值 |
 | 3 | 真实 LLM 跑 Bank | A | – | 待认领 | 至少 2 轮真实提案→训练→反馈；Token 账目对得上 |
-| 4 | 对照矩阵脚本 `python -m budgetlab.benchmark` | C | – | 待认领 | 产出符合 INTERFACES 第 5 节格式的 `results/<matrix_id>/` |
-| 5 | **对话式研究页 · 主流程**（16:00）：一句话加数据 → 协议卡片确认 → 开跑，步骤卡片流式显示 → 总结、holdout、快捷问答；含无 LLM 兜底路径 | D（牵头）、A、C | – | 待认领 | TEAM.md 4.4 的 16:00 验收（两条路径） |
-| 5b | **对话式研究页 · 完善**（19:30）：开放问答、用一句话修改协议、新 CSV 的拒绝提示、对比页签 | D、A、C | – | 待认领 | TEAM.md 4.4 的 19:30 验收 |
-| 6 | README、PPT、项目说明、录屏 | D（全员配合） | – | 待认领 | 数字全部来自 `results/` |
+| 4 | 对照矩阵脚本 `python -m budgetlab.benchmark` | C | yirran | ✅ `165a031` | 产出符合 INTERFACES 第 5 节格式的 `results/<matrix_id>/` |
+| 5 | **对话式研究页 · 主流程**（16:00）：一句话加数据 → 协议卡片确认 → 开跑，步骤卡片流式显示 → 总结、holdout、快捷问答；含无 LLM 兜底路径 | D（牵头）、A、C | chier1 | 🔄 第一版已合入 `5c304ea` | TEAM.md 4.4 的 16:00 验收（两条路径） |
+| 5b | **对话式研究页 · 完善**（19:30）：开放问答、用一句话修改协议、CSV 上传、对比页签 | D、A、C | chier1 | 待开始 | TEAM.md 4.4 的 19:30 验收 |
+| 6 | README、PPT、项目说明、录屏 | D（全员配合） | chier1 | 待开始 | 数字全部来自 `results/` |
 | 7 | 协议 Agent `DraftProtocol`（16:00 前，主流程必需） | A | – | 待认领 | Bank 上能正确排除 `duration`；记录首次正确率和成本 |
 | 8 | 问答 Agent `budgetlab/qa/agent.py` | A | – | 待认领 | 回答附证据，数字可核对，计量独立 |
-| 9 | 通用 CSV 适配器 `budgetlab/tasks/csv_task.py`（16:00 前） | C | – | 待认领 | 新的二分类 CSV 能 register → prepare → 跑通 |
+| 9 | 通用 CSV 适配器 `budgetlab/tasks/csv_task.py` | C | yirran | ✅ `0ce4c7c` | 新的二分类 CSV 能 register → prepare → 跑通 |
+| 10 | 第二个任务（改为 UCI Adult，不做 MLE-bench） | C | yirran | ✅ `c71a56f` | 场景卡 + prepare + 小矩阵能跑通 |
+| 11 | 正式矩阵准备：LLM 开跑前检查、`final.yaml` 和 `final-scripted.yaml` | C | yirran | ✅ `7e1a629`（配置待 A 确认预算） | `--dry-run` 能给出检查结果 |
+| 12 | 成绩表增加"对照随机搜索"和"成本效率"汇总 | C | yirran | ✅（`c/report-tables`，待推送） | 每个系统相对随机搜索的 Δholdout、ΔToken、Δ时间、胜负次数，以及每 1000 Token 带来的提升 |
+| 13 | 演示用 CSV 和协议标准答案 | C | yirran | 待开始（16:00） | 给 D 现场上传用，给 A 的协议 Agent 打分用 |
+| 14 | 数据与评测限制说明初稿 [`LIMITATIONS.md`](LIMITATIONS.md) | C | yirran | ✅ 初稿（待推送）；第 5 节等正式成绩出来后补 | 交给 D 放进报告和 PPT |
+| 15 | **正式矩阵运行**（19:30 冻结、20:00 打 tag 开跑） | C | yirran | 待 20:00 | `results/final-*` 提交，代码版本非 dirty |
 | P1 | `LLMSettings` 支持 `extra_body` | A | – | 待认领 | 选定的模型需要时再做 |
-| P1 | 经验库 `budgetlab/memory/` | B | – | 待认领 | 能写能读，并完成一次有经验 vs 无经验的对照 |
-| P1 | 第二个任务（MLE-bench 最多试 1 小时，否则换公开数据集） | C | – | 待认领 | 场景卡 + prepare + 小矩阵能跑通 |
+| P1 | 经验库 `budgetlab/memory/` | B | – | 待认领 | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |
 
 对话式研究页的流程和约束见 TEAM.md 第 4 节；时间线和合流点见第 5 节：13:00、16:00 两次合流；19:30 代码冻结；20:00 打 tag 并开跑正式矩阵。
 

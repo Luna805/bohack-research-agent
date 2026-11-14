@@ -64,7 +64,13 @@ def test_matrix_writes_interface_files(tmp_path, data_root, smoke_config) -> Non
         }
     assert rows[0]["proposal_source"] == "none"
     assert rows[1]["proposal_source"] == "scripted"
-    assert "budgetlab_no_schedule" in (out_dir / "aggregate.md").read_text(encoding="utf-8")
+    markdown = (out_dir / "aggregate.md").read_text(encoding="utf-8")
+    assert "budgetlab_no_schedule" in markdown
+    assert "Paired comparison against `random_search`" in markdown
+    comparison = json.loads((out_dir / "comparison.json").read_text(encoding="utf-8"))
+    assert comparison["paired"][0]["system"] == "budgetlab_no_schedule"
+    assert comparison["paired"][0]["pairs"] == 1
+    assert float(rows[0]["min_effect"]) > 0
 
 
 def test_repeats_change_only_the_search_seed(tmp_path, smoke_config) -> None:
@@ -186,3 +192,44 @@ def test_llm_matrix_preflight_catches_zero_budget_and_missing_model(
     assert benchmark.preflight(plan_slots(load_matrix(matrix_path), tmp_path)) == []
     scripted_path, _ = _write_matrix(tmp_path, smoke_config)
     assert benchmark.preflight(plan_slots(load_matrix(scripted_path), tmp_path)) == []
+
+
+def _row(task, repeat, system, holdout, *, tokens=0, wall=100.0, dev=0.70, min_effect=0.004):
+    return {
+        "task_id": task,
+        "repeat": repeat,
+        "system": system,
+        "status": "ok",
+        "holdout_score": holdout,
+        "llm_tokens": tokens,
+        "wall_seconds": wall,
+        "experiments": 10,
+        "fits": 60,
+        "delivered_dev_score": dev,
+        "baseline_score": 0.64,
+        "min_effect": min_effect,
+    }
+
+
+def test_paired_comparison_counts_wins_ties_losses_and_efficiency() -> None:
+    rows = [
+        _row("bank", 1, "random_search", 0.700),
+        _row("bank", 1, "budgetlab", 0.710, tokens=5000, wall=80, dev=0.72),  # +0.010 win
+        _row("bank", 2, "random_search", 0.705),
+        _row("bank", 2, "budgetlab", 0.707, tokens=7000, wall=90, dev=0.72),  # +0.002 tie
+        _row("bank", 3, "random_search", 0.712),
+        _row("bank", 3, "budgetlab", 0.700, tokens=6000, wall=70, dev=0.70),  # -0.012 loss
+        _row("bank", 4, "budgetlab", 0.730, tokens=6000),  # no reference run: unpaired
+        {"task_id": "bank", "repeat": 5, "system": "budgetlab", "status": "error"},
+    ]
+    result = benchmark.compare_systems(rows)
+    (pair,) = result["paired"]
+    assert (pair["pairs"], pair["wins"], pair["ties"], pair["losses"]) == (3, 1, 1, 1)
+    assert pair["mean_delta_holdout"] == pytest.approx(0.0)
+    assert pair["mean_llm_tokens"] == pytest.approx(6000)
+    assert pair["mean_delta_wall_seconds"] == pytest.approx(-20)
+    efficiency = {item["system"]: item for item in result["efficiency"]}
+    assert efficiency["random_search"]["dev_gain_per_1k_tokens"] is None  # spends no tokens
+    gain = efficiency["budgetlab"]["mean_dev_gain_over_baseline"]
+    assert gain == pytest.approx((0.08 + 0.08 + 0.06 + 0.06) / 4)
+    assert efficiency["budgetlab"]["dev_gain_per_1k_tokens"] == pytest.approx(gain / 6.0)

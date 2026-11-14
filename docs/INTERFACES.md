@@ -157,7 +157,8 @@ results/<matrix_id>/
 ├── matrix.json        # 预登记：matrix 配置、每个 slot（任务/重复/系统/配置哈希/search_seed）、code_version、git、环境、开始/结束时间
 ├── aggregate.csv      # 每个 slot 一行（列见下），按计划顺序：任务 → 重复 → 系统
 ├── aggregate.json     # 同一份数据的 JSON 版本
-├── aggregate.md       # 按（任务, 系统）汇总的均值 ± 标准差，人读
+├── aggregate.md       # 人读：各系统均值 ± 标准差、相对参照系统的配对比较、成本效率
+├── comparison.json    # 机读：{"reference", "paired": [...], "efficiency": [...]}（字段见下）
 └── runs/<run_id>/     # 只复制这三个文件：summary.json, final_evaluation.json, report.md
 ```
 
@@ -170,13 +171,27 @@ delivered_dev_score, holdout_score, dev_minus_holdout,
 llm_calls, llm_requests, llm_tokens, llm_unknown_tokens, cost_usd,
 wall_seconds, train_seconds, experiments, fits, rounds,
 duplicates_blocked, invalid_rejected, direction_changes_agent, direction_changes_rule,
-stop_reason, slot_id, status, error
+stop_reason, slot_id, status, error, min_effect
 ```
 
 `status` 为 `ok` 或 `error`。失败的 slot 也会占一行，但除了 `slot_id`、`task_id`、`system`、`repeat`、`error` 之外的字段都为空；可以用 `--resume` 重跑。
 
 - `matrix_id` 的命名：开发期用 `dev-<日期时间>`，正式矩阵用 `final-<日期时间>`。D 的页面默认展示最新的 `final-*`，没有时展示最新的 `dev-*`，并明确标注"开发数据"。
 - 曲线数据（最优分对累计 Token 和时间）直接取各 run 的 `summary.json` 中的 `trajectory`。
+
+`comparison.json` 的字段（参照系统默认是 `random_search`，可在矩阵配置里用 `reference_system` 修改）：
+
+```text
+paired[]:     task_id, system, reference, pairs, mean_delta_holdout, std_delta_holdout,
+              wins, ties, losses, mean_llm_tokens, mean_delta_wall_seconds,
+              mean_delta_experiments, mean_delta_fits, delta_holdout_per_1k_tokens
+efficiency[]: task_id, system, runs, mean_dev_gain_over_baseline, mean_holdout,
+              mean_llm_tokens, mean_wall_seconds, dev_gain_per_1k_tokens, dev_gain_per_minute
+```
+
+- 配对：同一任务、同一次重复（种子相同）的两个 run 互相比较。holdout 差值超过两者校准 `min_effect` 中较大的那个算胜（或负），否则算平。这是工程上的门槛，不是显著性检验。
+- `dev gain` 是"交付方案的开发集分数 − 基线开发集分数"。基线不在 holdout 上评测（holdout 只评交付方案一次），所以和基线比只能用开发集分数；系统之间比较 holdout 用 `paired`。
+- 不花 Token 的系统，"每 1000 Token 的提升"为 `null`，页面上显示为"–"。
 
 ### 5.1 矩阵配置与命令（C）
 

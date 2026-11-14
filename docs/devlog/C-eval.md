@@ -10,6 +10,16 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 12:43–12:48 · yirran + Claude Code（分支 `c/report-tables`）
+- 做了：数据与评测限制说明初稿 `docs/LIMITATIONS.md`。第 0 节是可以直接做成 PPT 的一页版；第 1–3 节分别是数据与任务、评测方法、系统与工程的限制（例如：只有两个任务、随机分层切分偏乐观、公开数据集可能被 LLM 记住、holdout 只有一份、工程门槛不是显著性检验、只重复 3 次、只用一个 LLM、对照组按实验数而不是时间对齐、文件级隔离不是沙箱）；第 4 节列出可以说和不要说的表述；第 5 节留给正式成绩出来后补；第 6 节是可以补强的地方（holdout 的 bootstrap 置信区间、Bank 按时间切分的检验）。
+- 验证：文中的数字都对照过配置和数据（holdout 行数、正例率、标定和确认的种子数、随机搜索的 18 次上限、单线程）。
+- 下一步：交给 D；等 A 和 D 回复后做演示 CSV。
+
+### 2026-11-14 约 12:33–12:42 · yirran + Claude Code（分支 `c/report-tables`）
+- 做了：成绩表新增两部分（`comparison.json` 和 `aggregate.md` 的两个新小节）。一是和参照系统（默认 random_search）的配对比较：同一任务、同一次重复的两个 run 比 holdout，胜/平/负的界线是两者校准 `min_effect` 中较大的那个，另外报 Token、墙钟、实验数的差值和"每 1000 Token 带来的 holdout 差"。二是成本效率：开发集相对基线的提升、每 1000 Token 的提升、每分钟的提升。`aggregate.csv` 末尾新增 `min_effect` 列；矩阵配置可以用 `reference_system` 更换参照系统。用新格式重新生成了已提交的 `results/dev-20261114T030336Z` 的汇总文件（原始运行证据没变）。HANDOFF 进度表同步更新。
+- 验证：`test_benchmark.py` 9 个测试通过（新增胜/平/负、未配对 run、出错 run、不花 Token 时效率为空的测试）；ruff 通过。
+- 说明：基线不在 holdout 上评测，所以"相对基线的提升"只能用开发集分数；系统之间的 holdout 比较用配对表。
+
 ### 2026-11-14 约 11:55–12:00 · yirran + Claude Code（分支 `c/final-prep`，基于 `c/second-task`）
 - 做了：矩阵脚本增加 **LLM 开跑前检查** `preflight()`：`proposer: llm` 时检查每个任务的 LLM 预算是否为正、模型名和 Key 是否已配置（不发请求）；不通过就在创建 results 目录之前报错，`--dry-run` 也会输出检查结果。起草 `configs/benchmark/final.yaml`（LLM，Bank 加 Adult，三个系统，3 次重复，每个 run 的 LLM 预算为 40 次请求、30 万 Token，`max_output_tokens` 2000，待 A 确认）和备用的 `configs/benchmark/final-scripted.yaml`。
 - 耗时估算（按机器空闲时的实测）：scripted 每次重复约 11.5 分钟（Bank 248 s + Adult 444 s），3 次重复约 35 分钟；LLM 版每次重复预计 20–35 分钟，3 次重复约 60–100 分钟，20:00–00:30 的窗口足够。如果 A 在 19:00 测得单次提案少于 10 秒，可以改成 5 次重复。

@@ -81,7 +81,9 @@ COLUMNS = (
     "slot_id",
     "status",
     "error",
+    "min_effect",
 )
+DEFAULT_TIE_BAND = 0.002  # used only when a row has no calibrated min_effect
 
 
 class MatrixError(RuntimeError):
@@ -134,6 +136,7 @@ def load_matrix(path: Path) -> dict[str, Any]:
         "proposer": proposer,
         "overrides": matrix.get("overrides", {}),
         "repeat_seed_stride": int(matrix.get("repeat_seed_stride", 1000)),
+        "reference_system": matrix.get("reference_system", "random_search"),
     }
 
 
@@ -231,6 +234,7 @@ def _row(
         "slot_id": slot["slot_id"],
         "status": "ok",
         "error": None,
+        "min_effect": summary.get("min_effect"),
     }
 
 
@@ -256,7 +260,109 @@ def _mean_std(values: list[float], digits: int = 4) -> str:
     return f"{statistics.mean(values):.{digits}f} ± {statistics.stdev(values):.{digits}f}"
 
 
-def write_aggregate(out_dir: Path, rows: list[dict[str, Any]]) -> None:
+def _mean(values: list[float]) -> float | None:
+    return statistics.mean(values) if values else None
+
+
+def compare_systems(rows: list[dict[str, Any]], reference: str = "random_search") -> dict[str, Any]:
+    """Paired comparison against ``reference`` plus cost efficiency, from ok rows only.
+
+    Pairs share task and repeat, hence the same split, training and search seeds. A pair is a
+    win or loss only when the holdout difference exceeds the larger calibrated ``min_effect``
+    of the two runs; this is an engineering band, not a significance test.
+    """
+    ok = [row for row in rows if row.get("status") == "ok" and row.get("holdout_score") is not None]
+    index = {(row["task_id"], row["repeat"], row["system"]): row for row in ok}
+    tasks = list(dict.fromkeys(row["task_id"] for row in ok))
+    paired: list[dict[str, Any]] = []
+    efficiency: list[dict[str, Any]] = []
+    for task in tasks:
+        task_rows = [row for row in ok if row["task_id"] == task]
+        systems = list(dict.fromkeys(row["system"] for row in task_rows))
+        repeats = sorted({row["repeat"] for row in task_rows})
+        for system in systems:
+            own = [row for row in task_rows if row["system"] == system]
+            tokens = _mean([float(row["llm_tokens"] or 0) for row in own]) or 0.0
+            wall = _mean([float(row["wall_seconds"]) for row in own])
+            dev_gain = _mean(
+                [float(row["delivered_dev_score"]) - float(row["baseline_score"]) for row in own]
+            )
+            efficiency.append(
+                {
+                    "task_id": task,
+                    "system": system,
+                    "runs": len(own),
+                    "mean_dev_gain_over_baseline": dev_gain,
+                    "mean_holdout": _mean([float(row["holdout_score"]) for row in own]),
+                    "mean_llm_tokens": tokens,
+                    "mean_wall_seconds": wall,
+                    "dev_gain_per_1k_tokens": dev_gain / (tokens / 1000)
+                    if tokens > 0 and dev_gain is not None
+                    else None,
+                    "dev_gain_per_minute": dev_gain / (wall / 60)
+                    if wall and dev_gain is not None
+                    else None,
+                }
+            )
+            if system == reference:
+                continue
+            pairs = [
+                (index[(task, repeat, system)], index[(task, repeat, reference)])
+                for repeat in repeats
+                if (task, repeat, system) in index and (task, repeat, reference) in index
+            ]
+            if not pairs:
+                continue
+            deltas, wins, losses = [], 0, 0
+            for mine, ref in pairs:
+                delta = float(mine["holdout_score"]) - float(ref["holdout_score"])
+                band = max(
+                    float(mine.get("min_effect") or DEFAULT_TIE_BAND),
+                    float(ref.get("min_effect") or DEFAULT_TIE_BAND),
+                )
+                deltas.append(delta)
+                wins += delta > band
+                losses += delta < -band
+            mean_tokens = _mean([float(mine["llm_tokens"] or 0) for mine, _ in pairs]) or 0.0
+            mean_delta = statistics.mean(deltas)
+            paired.append(
+                {
+                    "task_id": task,
+                    "system": system,
+                    "reference": reference,
+                    "pairs": len(pairs),
+                    "mean_delta_holdout": mean_delta,
+                    "std_delta_holdout": statistics.stdev(deltas) if len(deltas) > 1 else None,
+                    "wins": wins,
+                    "ties": len(pairs) - wins - losses,
+                    "losses": losses,
+                    "mean_llm_tokens": mean_tokens,
+                    "mean_delta_wall_seconds": _mean(
+                        [float(m["wall_seconds"]) - float(r["wall_seconds"]) for m, r in pairs]
+                    ),
+                    "mean_delta_experiments": _mean(
+                        [float(m["experiments"]) - float(r["experiments"]) for m, r in pairs]
+                    ),
+                    "mean_delta_fits": _mean(
+                        [float(m["fits"]) - float(r["fits"]) for m, r in pairs]
+                    ),
+                    "delta_holdout_per_1k_tokens": mean_delta / (mean_tokens / 1000)
+                    if mean_tokens > 0
+                    else None,
+                }
+            )
+    return {"reference": reference, "paired": paired, "efficiency": efficiency}
+
+
+def _fmt(value: float | None, digits: int = 4, signed: bool = False) -> str:
+    if value is None:
+        return "–"
+    return f"{value:+.{digits}f}" if signed else f"{value:.{digits}f}"
+
+
+def write_aggregate(
+    out_dir: Path, rows: list[dict[str, Any]], reference: str = "random_search"
+) -> None:
     """Rows are written in matrix plan order (task -> repeat -> system)."""
     with (out_dir / "aggregate.csv").open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=COLUMNS, lineterminator="\n")
@@ -289,6 +395,51 @@ def write_aggregate(out_dir: Path, rows: list[dict[str, Any]]) -> None:
             f" | {_mean_std(col('holdout_score'))} | {_mean_std(col('llm_tokens'), 0)} | "
             f"{_mean_std(col('wall_seconds'), 1)} | {confirmed}/{len(items)} |"
         )
+    comparison = compare_systems(rows, reference)
+    atomic_write_json(out_dir / "comparison.json", comparison)
+    if comparison["paired"]:
+        lines += [
+            "",
+            f"## Paired comparison against `{reference}` (same task and repeat, same seeds)",
+            "",
+            "W/T/L: holdout difference beyond the larger calibrated min_effect of the pair "
+            "(engineering band, not a significance test).",
+            "",
+            "| task | system | pairs | Δ holdout | W/T/L | LLM tokens | Δ wall s | Δ experiments"
+            " | Δ holdout per 1k tokens |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for item in comparison["paired"]:
+            spread = item["std_delta_holdout"]
+            delta = _fmt(item["mean_delta_holdout"], signed=True) + (
+                f" ± {spread:.4f}" if spread is not None else ""
+            )
+            lines.append(
+                f"| {item['task_id']} | {item['system']} | {item['pairs']} | {delta} | "
+                f"{item['wins']}/{item['ties']}/{item['losses']} | "
+                f"{_fmt(item['mean_llm_tokens'], 0)} | "
+                f"{_fmt(item['mean_delta_wall_seconds'], 1, signed=True)} | "
+                f"{_fmt(item['mean_delta_experiments'], 1, signed=True)} | "
+                f"{_fmt(item['delta_holdout_per_1k_tokens'], 5, signed=True)} |"
+            )
+    if comparison["efficiency"]:
+        lines += [
+            "",
+            "## Cost efficiency (dev gain = delivered dev score - baseline dev score)",
+            "",
+            "| task | system | runs | dev gain | holdout | LLM tokens | wall s"
+            " | dev gain per 1k tokens | dev gain per minute |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for item in comparison["efficiency"]:
+            lines.append(
+                f"| {item['task_id']} | {item['system']} | {item['runs']} | "
+                f"{_fmt(item['mean_dev_gain_over_baseline'], signed=True)} | "
+                f"{_fmt(item['mean_holdout'])} | {_fmt(item['mean_llm_tokens'], 0)} | "
+                f"{_fmt(item['mean_wall_seconds'], 1)} | "
+                f"{_fmt(item['dev_gain_per_1k_tokens'], 5, signed=True)} | "
+                f"{_fmt(item['dev_gain_per_minute'], 4, signed=True)} |"
+            )
     failed = [row for row in rows if row["status"] != "ok"]
     if failed:
         lines += ["", f"Failed slots: {', '.join(row['slot_id'] for row in failed)}"]
@@ -399,7 +550,11 @@ def run_matrix(
                 matrix_id, slot, f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
             )
             log(f"[{matrix_id}]   FAILED: {type(exc).__name__}: {exc}")
-        write_aggregate(out_dir, [rows[s["slot_id"]] for s in slots if s["slot_id"] in rows])
+        write_aggregate(
+            out_dir,
+            [rows[s["slot_id"]] for s in slots if s["slot_id"] in rows],
+            matrix.get("reference_system", "random_search"),
+        )
     record["finished_at"] = utc_now()
     record["completed_slots"] = sum(row["status"] == "ok" for row in rows.values())
     atomic_write_json(out_dir / "matrix.json", record)
