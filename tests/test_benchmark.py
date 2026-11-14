@@ -181,6 +181,25 @@ def test_untracked_code_makes_checkout_dirty_but_outputs_do_not(tmp_path) -> Non
     assert info["dirty_files"] == ["new_module.py"]
 
 
+def test_git_info_reads_a_non_ascii_branch_name(tmp_path) -> None:
+    """Git prints UTF-8; on Windows (cp1252 locale) a Chinese branch name used to crash runs."""
+    import subprocess
+
+    from budgetlab.provenance import git_info
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (tmp_path / "a.py").write_text("x = 1\n")
+    git("add", "a.py")
+    git("commit", "-q", "-m", "init")
+    git("checkout", "-q", "-b", "前端优化")
+    assert git_info(tmp_path)["branch"] == "前端优化"
+
+
 def test_llm_matrix_preflight_catches_zero_budget_and_missing_model(
     tmp_path, smoke_config, monkeypatch
 ) -> None:

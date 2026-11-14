@@ -14,8 +14,16 @@ PACKAGES = ("scikit-learn", "pandas", "numpy", "pydantic", "pydantic-ai-slim")
 
 def _git(root: Path, *args: str, strip: bool = True) -> str | None:
     try:
+        # Git prints UTF-8 (branch names such as 前端优化). text=True would decode with the
+        # locale encoding, which is cp1252 on Windows and fails on those bytes.
         completed = subprocess.run(
-            ["git", *args], cwd=root, capture_output=True, text=True, timeout=10, check=False
+            ["git", *args],
+            cwd=root,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None
