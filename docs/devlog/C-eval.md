@@ -10,6 +10,11 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 13:40–13:53 · yirran + Claude Code（分支 `c/demo-csv`）
+- 做了：演示数据 `examples/student_risk/`，用 UCI Student Performance 的葡语课程数据做"学年初预测期末不及格"：649 人，100 人不及格，CC BY 4.0。CSV **有意保留了 G1、G2、G3**（`build_demo_csv.py` 会下载、校验哈希后重新生成）。`card.yaml` 是标准答案：必须排除 G1、G2、G3，`absences` 是边界情况（统计的是本学年缺勤）。README 写了对话里的一句话描述、给 A 的打分规则和用法。TEAM 和 INTERFACES 8.1 已加上指引。
+- 验证：新增离线测试，用标准答案注册后恰好排除这 4 列；`test_csv_task.py` 7 个测试通过；ruff 通过。实跑（scripted，budgetlab，各 1 次）：正确协议的 holdout 是 0.649（0.551–0.745），只排除 G3 时是 0.890，所有字段都可用时是 1.000；每次约 20 秒。协议越错，分数越"好看"，适合现场演示"任务理解"的价值。
+- 注意：holdout 只有 130 人，区间很宽；正确协议下开发集和 holdout 的差距（0.722 对 0.649）不能据此判断过拟合。
+
 ### 2026-11-14 约 13:17–13:30 · yirran + Claude Code（分支 `c/dev-results-ci`）
 - 做了：在干净的 `e053b73`（机器空闲）上重跑两个任务的开发矩阵 → `results/dev-20261114T051756Z`（scripted，1 次重复，6 个 slot 全部成功），这是第一份带 holdout 置信区间和配对 bootstrap 的结果，交给 D 当样例数据。
 - 结果：
