@@ -1,6 +1,6 @@
 # BudgetLab 模块接口规范
 
-> 角色之间只通过下面这些接口对接。接口的负责人可以改实现，但**只能加字段，不能改名或删字段**。破坏性修改要先在群里说，同时提升版本号并更新本文（见 TEAM.md 5.2）。
+> 角色之间只通过下面这些接口对接。接口的负责人可以改实现，但**只能加字段，不能改名或删字段**。破坏性修改要先在群里说，同时提升版本号并更新本文（见 TEAM.md 6.2）。
 > 代码是事实来源；本文和代码不一致时，以代码为准，并立刻修正本文。
 
 | # | 接口 | 提供方 | 使用方 |
@@ -12,6 +12,7 @@
 | 5 | `results/` 对照结果格式 | C | D |
 | 6 | 经验库（P1） | B | A |
 | 7 | 配置文件分段 | 各段负责人 | 全员 |
+| 8 | 对话式研究页的对接（协议草稿、CSV 任务、后台运行、问答） | A / C / D | D |
 
 ---
 
@@ -199,3 +200,98 @@ memory/<snapshot_id>.json     # 冻结后只读；run_config 中记录所用快�
 
 - 开发期的实验配置各自新建文件，例如 `configs/llm-dev.yaml`、`configs/benchmark/dev.yaml`。
 - 正式矩阵使用的配置在冻结时由协调人确认，之后不再改。
+
+## 8. 对话式研究页的对接（A / C / D）
+
+流程见 TEAM.md 第 4 节。本节只定义各角色之间传递的数据，具体实现由各负责人自定。
+
+### 8.1 协议草稿 `DraftProtocol`（A 产出，D 展示，人确认后交给 C）
+
+```python
+class FieldDecision(BaseModel):     # 定义在 budgetlab/agents/protocol_agent.py
+    name: str
+    availability: Literal["available", "post_outcome", "identifier"]
+    reason: str                      # 一句话说明理由，展示给人看
+
+class DraftProtocol(BaseModel):
+    title: str
+    business_question: str
+    prediction_time: str             # 例如 "before the outbound call is placed"
+    target_column: str
+    positive_label: str
+    primary_metric: Literal["f1_macro", "accuracy", "roc_auc"]
+    fields: list[FieldDecision]      # 必须覆盖除目标列以外的每一列
+    questions_for_user: list[str]    # 拿不准、需要人确认的地方
+```
+
+- 输入：一句话描述、列名、开发数据画像（`profile_development` 的输出，**不带可用性标注**）。不能把 holdout 传给它。
+- 调用协议 Agent 时也要计量 Token，记录到 `ui_state/llm_calls.jsonl`，和研究预算分开。
+- 人确认（可以先修改）后，D 把最终结果转换成场景卡 dict（格式见第 4 节），交给 C 的 `register_csv_task`。草稿和最终版都保存在 `data/uploads/<task_id>/` 下：`draft_protocol.json`、`card.yaml`。
+
+### 8.2 通用 CSV 任务（C 提供，D 调用）
+
+```python
+# budgetlab/tasks/csv_task.py
+register_csv_task(csv_path: Path, card: dict, data_root: Path) -> str   # 返回 task_id，例如 "upload-<8位哈希>"
+validate_csv_for_task(csv_path: Path, target_column: str) -> list[str]  # 返回拒绝理由，空列表表示可以
+```
+
+- 注册的结果要**落到文件**，写到 `data/uploads/<task_id>/`（数据副本、`card.yaml`、`task.json`）。这样 `get_task(task_id)` 在训练子进程里也能找到它，C 负责让 `get_task` 能从这个目录发现上传的任务。
+- 注册后照常用 `prepare_task(task_id, data_root)` 切出密封 holdout，再交给 `run_research`。
+- 拒绝的条件：目标列不是两个取值、行数超过 10 万、列数超过 200、某一类样本数少于折数，或者确认后没有任何可用特征。
+
+### 8.3 后台运行与进度（D 实现，读取第 1 节的 run 目录）
+
+- 启动方式：子进程执行 `python -m budgetlab.cli research --config <生成的配置> --system <系统> --proposer <scripted|llm> --runs-root runs --data-root data`。页面生成的配置写到 `ui_state/configs/`，不要改 `configs/` 下的共享文件。
+- 识别本次的 run 目录：启动前记下 `runs/` 里已有哪些目录，启动后新出现的那一个就是。进程信息写到 `ui_state/launches.jsonl`，页面刷新后可以重新接上。
+- 步骤卡片只根据 `events.jsonl` 的 `event_type`、`rounds/round-NN.json` 和 `experiments/<id>.json` 渲染，不解析日志文本。对应关系如下：
+
+| 卡片 | 事件或文件 |
+|---|---|
+| 协议与数据画像 | `protocol_accepted`、`profile_written` → `protocol.json`、`eda.json` |
+| 基线与门槛标定 | `baseline_completed`、`calibration_completed`、`contract_frozen` → `calibration.json` |
+| 第 N 轮提案 | `llm_call_*`（role=proposer）→ `rounds/round-NN.json` 中的 proposal、rejected、not_run |
+| 训练与裁决 | `experiment_completed` / `experiment_failed`、`evaluation_recorded` → `experiments/<id>.json` |
+| 规则动作 | `tool_search_started/completed`、`direction_changed`、`llm_call_*`（role=critic） |
+| 停止与确认 | `stop_decided`、`confirmation_completed` → `confirmation.json`、`confirmation/split-*.json` |
+| 交付与评测 | `delivery_frozen`、`run_terminal` → `summary.json`；`final_evaluation_recorded` |
+
+- 进程退出后如果没有出现 `run_terminal` 事件，页面要显示"失败"，并展示 `logs/` 和子进程输出的最后几行。
+
+### 8.4 证据工具与问答（D 提供工具，A 实现 Agent）
+
+```python
+# budgetlab/qa/evidence.py （D）— 只读，路径白名单：runs/ 和 results/；拒绝 data/sealed/、data/uploads/、.env
+list_runs() -> list[dict]                        # run_id, system, task_id, 是否结束, 开始时间
+get_summary(run_id) -> dict
+get_experiment(run_id, experiment_id) -> dict
+get_round(run_id, round_index) -> dict
+get_llm_calls(run_id) -> list[dict]
+get_final_evaluation(run_id) -> dict | None
+
+# budgetlab/qa/faq.py （D）— 0 Token
+QUICK_QUESTIONS: list[str]
+answer_quick(question_id, run_id) -> QAAnswer
+
+# budgetlab/qa/agent.py （A）
+answer_open(question: str, run_id: str, history: list[dict]) -> tuple[QAAnswer, CallOutcome]
+```
+
+```python
+class EvidenceRef(BaseModel):
+    run_id: str
+    kind: Literal["summary", "experiment", "round", "llm_call", "final_evaluation"]
+    ref_id: str                        # 实验 id、轮次编号等
+
+class QAAnswer(BaseModel):            # 定义在 budgetlab/qa/__init__.py，A 和 D 共用
+    answer: str
+    evidence: list[EvidenceRef]
+    numbers: list[str]                 # 回答里出现的数字
+    verified_numbers: list[str] = []   # 由程序填写：能在证据里找到的数字
+    source: Literal["quick", "llm"]
+```
+
+- 程序负责核对：引用的证据必须存在；`numbers` 里的数字要能在本次工具返回的内容里找到（允许 4 位小数以内的舍入），找到的放进 `verified_numbers`，页面上找不到的标 ⚠️。
+- 问答的 Token 记到 `ui_state/qa_calls.jsonl`，每个会话设上限（默认 20 次请求、50k Token）。
+- 问答 Agent 只能调用上面这些只读工具，不能开跑、评测或修改任何文件。
+
