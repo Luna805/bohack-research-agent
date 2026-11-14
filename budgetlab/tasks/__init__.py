@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ssl
 import urllib.request
 import zipfile
 from collections.abc import Callable
@@ -75,13 +76,31 @@ def _bank_csv_path(raw_dir: Path) -> Path:
     return raw_dir / "bank-additional" / "bank-additional-full.csv"
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Prefer certifi's CA bundle: some macOS/pyenv Pythons ship without system CAs."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def download_bank_marketing(raw_dir: Path) -> Path:
     target = _bank_csv_path(raw_dir)
     if target.exists():
         return target
     raw_dir.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(BANK_URL, timeout=60) as response:  # noqa: S310 - fixed URL
-        outer = zipfile.ZipFile(io.BytesIO(response.read()))
+    try:
+        with urllib.request.urlopen(  # noqa: S310 - fixed URL
+            BANK_URL, timeout=60, context=_ssl_context()
+        ) as response:
+            outer = zipfile.ZipFile(io.BytesIO(response.read()))
+    except OSError as exc:
+        raise RuntimeError(
+            f"download failed ({exc}). Download {BANK_URL} manually, unzip it, unzip the inner "
+            f"bank-additional.zip, and place bank-additional-full.csv at {target}"
+        ) from exc
     inner = zipfile.ZipFile(io.BytesIO(outer.read("bank-additional.zip")))
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(inner.read("bank-additional/bank-additional-full.csv"))
