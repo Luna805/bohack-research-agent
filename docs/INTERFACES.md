@@ -24,6 +24,7 @@
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------- |
 | `summary.json`                                                                                                                                                                          | 一次 run 的全部汇总，**界面和表格都从这里取数**       | C、D     |
 | `final_evaluation.json`                                                                                                                                                                 | holdout 一次性评测结果                    | C、D     |
+| `holdout_predictions.csv` | 评测时保存的逐行预测（`row_id, y_pred, y_score`），**不含标签**；只供配对 bootstrap 使用 | C |
 | `report.md`                                                                                                                                                                             | 人读报告（D 负责模板）                       | 评委      |
 | `events.jsonl`                                                                                                                                                                          | 单写者事件流，`seq` 连续                    | D（轨迹回放） |
 | `experiments/<id>.json`                                                                                                                                                                 | 单个实验的规格、结果和全部裁决                    | D（证据链）  |
@@ -61,7 +62,10 @@ budget{limits, used, reserved, unknown, tail_reserve, reservations}
 
 ### 1.2 `final_evaluation.json`
 
-`run_id, metric, holdout_score, holdout_rows, development_cv_score, dev_minus_holdout, delivered_experiment_id, model_hash, evaluated_at`
+`run_id, metric, holdout_score, holdout_ci95[low, high], bootstrap{method, resamples, seed}, holdout_rows, development_cv_score, dev_minus_holdout, delivered_experiment_id, model_hash, predictions_ref, predictions_sha256, evaluated_at`
+
+- `holdout_ci95`：在 holdout 行上做百分位 bootstrap（1000 次重采样，固定种子）得到的 95% 区间。它描述"这个分数会因为 holdout 抽样而波动多少"，不是显著性检验。
+- 评测时同时保存 `holdout_predictions.csv`（`row_id, y_pred, y_score`），**不含标签**；标签只留在 `data/sealed/`，只有评测模块能读。这份文件只用于系统之间的配对 bootstrap，不复制到 `results/`。
 
 ### 1.3 `events.jsonl`
 
@@ -154,9 +158,12 @@ known_limitations: [...]
 
 ```text
 results/<matrix_id>/
-├── matrix.json        # 预登记：tasks, systems, repeats, config 路径和哈希, code_version, 开始/结束时间
-├── aggregate.csv      # 每个 run 一行（列见下）
+├── matrix.json        # 预登记：matrix 配置、每个 slot（任务/重复/系统/配置哈希/search_seed）、code_version、git、环境、开始/结束时间
+├── aggregate.csv      # 每个 slot 一行（列见下），按计划顺序：任务 → 重复 → 系统
 ├── aggregate.json     # 同一份数据的 JSON 版本
+├── aggregate.md       # 人读：各系统均值 ± 标准差、相对参照系统的配对比较、成本效率
+├── comparison.json    # 机读：{"reference", "paired": [...], "efficiency": [...]}（字段见下）
+├── paired_bootstrap.json  # 每一对（任务/重复/系统 vs 参照）的配对 bootstrap 原始结果，矩阵跑完后生成
 └── runs/<run_id>/     # 只复制这三个文件：summary.json, final_evaluation.json, report.md
 ```
 
@@ -169,11 +176,52 @@ delivered_dev_score, holdout_score, dev_minus_holdout,
 llm_calls, llm_requests, llm_tokens, llm_unknown_tokens, cost_usd,
 wall_seconds, train_seconds, experiments, fits, rounds,
 duplicates_blocked, invalid_rejected, direction_changes_agent, direction_changes_rule,
-stop_reason
+stop_reason, slot_id, status, error, min_effect, holdout_ci_low, holdout_ci_high
 ```
+
+`status` 为 `ok` 或 `error`。失败的 slot 也会占一行，但除了 `slot_id`、`task_id`、`system`、`repeat`、`error` 之外的字段都为空；可以用 `--resume` 重跑。
 
 - `matrix_id` 的命名：开发期用 `dev-<日期时间>`，正式矩阵用 `final-<日期时间>`。D 的页面默认展示最新的 `final-*`，没有时展示最新的 `dev-*`，并明确标注"开发数据"。
 - 曲线数据（最优分对累计 Token 和时间）直接取各 run 的 `summary.json` 中的 `trajectory`。
+
+`comparison.json` 的字段（参照系统默认是 `random_search`，可在矩阵配置里用 `reference_system` 修改）：
+
+```text
+paired[]:     task_id, system, reference, pairs, mean_delta_holdout, std_delta_holdout,
+              wins, ties, losses, mean_llm_tokens, mean_delta_wall_seconds,
+              mean_delta_experiments, mean_delta_fits, delta_holdout_per_1k_tokens,
+              holdout_ci_pairs[{repeat, delta, ci95, share_positive, identical_predictions}],
+              pairs_ci_above_zero, pairs_ci_below_zero
+efficiency[]: task_id, system, runs, mean_dev_gain_over_baseline, mean_holdout,
+              mean_llm_tokens, mean_wall_seconds, dev_gain_per_1k_tokens, dev_gain_per_minute
+```
+
+- 配对：同一任务、同一次重复（种子相同）的两个 run 互相比较。holdout 差值超过两者校准 `min_effect` 中较大的那个算胜（或负），否则算平。这是工程上的门槛，不是显著性检验。
+- `dev gain` 是"交付方案的开发集分数 − 基线开发集分数"。基线不在 holdout 上评测（holdout 只评交付方案一次），所以和基线比只能用开发集分数；系统之间比较 holdout 用 `paired`。
+- 不花 Token 的系统，"每 1000 Token 的提升"为 `null`，页面上显示为"–"。
+- 配对 bootstrap：两个交付模型在**同一份 holdout 的同一批重采样行**上分别打分后相减，得到差值的 95% 区间。`pairs_ci_above_zero` / `pairs_ci_below_zero` 是区间完全在 0 以上 / 以下的配对数。它们只在矩阵跑完后才会出现（逐个 run 写入时为 `null`）；在加入置信区间之前就评测过的旧 run 没有预测文件，会被跳过。
+
+### 5.1 矩阵配置与命令（C）
+
+```yaml
+# configs/benchmark/<名字>.yaml
+kind: dev | final              # final 要求 git 工作区干净
+tasks: [{name: bank_marketing, config: configs/bank_marketing.yaml, overrides: {}}]
+systems: [random_search, budgetlab_no_schedule, budgetlab]
+repeats: 3
+proposer: scripted | llm       # random_search 不使用提案器
+repeat_seed_stride: 1000       # 第 r 次重复：search_seed + (r-1) × stride，所有系统相同；切分和训练种子不变
+overrides: {}                  # 合并进每个任务配置
+```
+
+```bash
+python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml --dry-run   # 只列出计划
+python -m budgetlab.benchmark --matrix configs/benchmark/dev.yaml             # 串行运行，每个 run 结束后立即评测 holdout
+python -m budgetlab.benchmark --resume <matrix_id>                            # 中断后继续；任务配置变了会拒绝
+```
+
+- `proposer: llm` 的矩阵在开跑前会做检查：每个任务配置的 `max_llm_requests` 和 `max_llm_tokens` 必须为正数，模型名和 Key 必须已配置（只构造对象，不发请求）。`--dry-run` 也会输出检查结果。
+- 正式矩阵的配置：`configs/benchmark/final.yaml`（LLM，两个任务 × 三个系统 × 3 次重复，LLM 预算和输出上限待 A 确认）；拿不到 LLM 时用 `configs/benchmark/final-scripted.yaml`。两份都是 19:30 冻结前的草稿。
 
 ## 6. 经验库（P1，B 提供，A 使用）
 
@@ -233,13 +281,26 @@ class DraftProtocol(BaseModel):
 
 ```python
 # budgetlab/tasks/csv_task.py
-register_csv_task(csv_path: Path, card: dict, data_root: Path) -> str   # 返回 task_id，例如 "upload-<8位哈希>"
-validate_csv_for_task(csv_path: Path, target_column: str) -> list[str]  # 返回拒绝理由，空列表表示可以
+read_csv_any(csv_path) -> pd.DataFrame          # 自动识别编码（UTF-8 / UTF-8 BOM / GBK / Latin-1）和分隔符（, ; Tab |）
+validate_csv_for_task(csv_path, target_column) -> list[str]   # 上传后、起草协议前先检查；空列表表示可以
+register_csv_task(csv_path, card: dict, data_root) -> str     # 人确认协议后调用；返回 "upload-<10位哈希>"
+config_for_upload(task_id, base_config: dict) -> dict          # 基于某个配置（如 configs/bank_marketing.yaml）换成这个任务
+class CsvTaskError(ValueError): reasons: list[str]             # register 失败时一次性给出全部理由（中文，可直接展示）
 ```
 
-- 注册的结果要**落到文件**，写到 `data/uploads/<task_id>/`（数据副本、`card.yaml`、`task.json`）。这样 `get_task(task_id)` 在训练子进程里也能找到它，C 负责让 `get_task` 能从这个目录发现上传的任务。
-- 注册后照常用 `prepare_task(task_id, data_root)` 切出密封 holdout，再交给 `run_research`。
-- 拒绝的条件：目标列不是两个取值、行数超过 10 万、列数超过 200、某一类样本数少于折数，或者确认后没有任何可用特征。
+D 的调用顺序：
+```python
+reasons = validate_csv_for_task(path, target)        # 有理由就直接在对话里展示并停下
+task_id = register_csv_task(path, confirmed_card, Path("data"))   # 失败时抛 CsvTaskError
+prepare_task(task_id, Path("data"))                  # 切出密封 holdout（20%，分层，固定种子）
+config = config_for_upload(task_id, yaml.safe_load(open("configs/bank_marketing.yaml")))
+# 把 config 写到 ui_state/configs/<task_id>.yaml，再用子进程跑 research（8.3）
+```
+
+- `card` 的格式同第 4 节的场景卡，另外可以带 `primary_metric`（默认 `f1_macro`）。`task_id` 由 C 生成，不需要传入。`fields` 必须覆盖除目标列以外的每一列。
+- 同一份 CSV 加同一份确认后的协议，得到的 `task_id` 相同（可以重复注册）；协议有任何改动，就会得到新的 `task_id`。
+- 注册结果落盘在 `<data_root>/uploads/<task_id>/`：`data.csv`（统一转为 UTF-8、逗号分隔）、`card.yaml`、`task.json`。`get_task(task_id)` 通过 `register_data_root` 登记过的数据根目录查找上传任务（`prepare_task` 和 `load_development` 会自动登记），找不到时再依次查 `<项目>/data` 和 `<当前目录>/data`，所以训练子进程也能找到。`data/uploads/` 不进 git。
+- 拒绝条件（理由用中文，可以直接展示）：读不了文件；目标列不存在、有缺失值、或不是正好两个取值；少数类少于 10 行；超过 10 万行或 200 列；协议缺少必填字段；正类不是目标列的取值之一；有列没写明能否使用、或可用性的值不合法；确认后没有可用特征；某个可用的类别列不同取值超过 1000 个（高基数类别或文本列暂不支持，请标成 `identifier`）。
 
 ### 8.3 后台运行与进度（D 实现，读取第 1 节的 run 目录）
 

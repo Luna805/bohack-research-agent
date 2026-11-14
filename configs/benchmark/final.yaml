@@ -1,0 +1,30 @@
+# OFFICIAL matrix (role C) - DRAFT until the 19:30 freeze; A confirms the llm/budget numbers.
+# Run only after the freeze, on one idle machine, from a clean checkout of the tag:
+#   git checkout benchmark-freeze
+#   python -m budgetlab.benchmark --matrix configs/benchmark/final.yaml --dry-run   # preflight
+#   caffeinate -i python -m budgetlab.benchmark --matrix configs/benchmark/final.yaml
+# If it is interrupted:  python -m budgetlab.benchmark --resume <final-...>
+#
+# Size estimate (measured on the M-series Mac, scripted proposals, idle machine):
+#   Bank ~248 s and Adult ~444 s per repeat for all three systems -> ~11.5 min per repeat.
+#   LLM runs add model latency and may use all 8 rounds: assume 20-35 min per repeat.
+#   3 repeats -> roughly 60-100 min, well inside 20:00-00:30. Use 5 repeats if A measures
+#   fast responses (< 10 s per proposal) at 19:00.
+kind: final
+description: Bank Marketing and Adult, three systems, LLM proposals, three repeats
+tasks:
+  - name: bank_marketing
+    config: configs/bank_marketing.yaml
+  - name: adult
+    config: configs/adult.yaml
+systems: [random_search, budgetlab_no_schedule, budgetlab]
+repeats: 3
+proposer: llm
+repeat_seed_stride: 1000
+overrides:
+  budget:                       # the same hard budget for every system (random_search uses 0 tokens)
+    max_llm_requests: 40        # per run: ~8 proposer + <=2 critic calls, each reserving 2 requests
+    max_llm_tokens: 300000      # per run; reservations are conservative, actual use is settled after
+  llm:
+    max_output_tokens: 2000     # A: confirm after probe-llm (non-thinking models need ~1-2k)
+    output_retries: 1

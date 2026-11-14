@@ -1,0 +1,55 @@
+task_id: adult
+title: Census income above 50K (UCI Adult)
+source: >-
+  UCI Machine Learning Repository, Adult (Becker and Kohavi 1996), extracted from the 1994 US
+  Current Population Survey; adult.data and adult.test are combined and re-split by this project.
+business_question: >-
+  From a person's census record, estimate whether their annual income exceeds 50K USD, for
+  example to decide who receives a mailing about a financial product.
+prediction_time: >-
+  after the census record is collected, using the recorded attributes below, before the
+  person's total income is known
+decision_use: choose recipients of a targeted mailing; both missed high earners and wasted mail matter
+error_costs: >-
+  Missing a high earner loses a potential customer; mailing a low earner wastes postage. Neither
+  dominates, so the frozen metric is macro-F1 over the two classes.
+entity: one row per person; there is no person identifier in the file
+deployment_data: future records collected the same way
+target:
+  column: income
+  positive_label: ">50K"
+  description: annual income above 50K USD
+missing_values: >-
+  workclass, occupation and native-country use "?" for unknown; the adapter turns "?" into a
+  missing value
+fields:
+  - {name: age, group: person, type: numeric, availability: available, description: age in years}
+  - {name: workclass, group: work, type: categorical, availability: available, description: employer type}
+  - name: fnlwgt
+    group: survey
+    type: numeric
+    availability: available
+    description: census sampling weight
+    note: >-
+      How many people in the population this record stands for. It describes the survey design,
+      not the person, and is usually close to useless for prediction.
+  - {name: education, group: person, type: categorical, availability: available, description: highest education level}
+  - name: education-num
+    group: person
+    type: numeric
+    availability: available
+    description: education level as a number
+    note: Same information as education, encoded as an ordinal number.
+  - {name: marital-status, group: person, type: categorical, availability: available, description: marital status}
+  - {name: occupation, group: work, type: categorical, availability: available, description: occupation}
+  - {name: relationship, group: person, type: categorical, availability: available, description: role in the household}
+  - {name: race, group: person, type: categorical, availability: available, description: race (protected attribute)}
+  - {name: sex, group: person, type: categorical, availability: available, description: sex (protected attribute)}
+  - {name: capital-gain, group: assets, type: numeric, availability: available, description: capital gains reported for the year; mostly zero}
+  - {name: capital-loss, group: assets, type: numeric, availability: available, description: capital losses reported for the year; mostly zero}
+  - {name: hours-per-week, group: work, type: numeric, availability: available, description: usual working hours per week}
+  - {name: native-country, group: person, type: categorical, availability: available, description: country of origin}
+known_limitations:
+  - Data is from 1994; income levels and the economy have changed since.
+  - race and sex are legally protected attributes. They are kept as in the standard benchmark, but a real deployment would need a fairness review before using them.
+  - A random stratified split is used; it does not test drift to later survey years.

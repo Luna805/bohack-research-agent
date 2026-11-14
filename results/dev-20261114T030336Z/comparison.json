@@ -1,0 +1,72 @@
+{
+  "efficiency": [
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.042515513268985554,
+      "mean_dev_gain_over_baseline": 0.06854917922736103,
+      "mean_holdout": 0.7099104486403394,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 96.74,
+      "runs": 1,
+      "system": "random_search",
+      "task_id": "bank_marketing"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.059755204905443296,
+      "mean_dev_gain_over_baseline": 0.06854917922736103,
+      "mean_holdout": 0.7099104486403394,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 68.83,
+      "runs": 1,
+      "system": "budgetlab_no_schedule",
+      "task_id": "bank_marketing"
+    },
+    {
+      "dev_gain_per_1k_tokens": null,
+      "dev_gain_per_minute": 0.04995688999929142,
+      "mean_dev_gain_over_baseline": 0.06854917922736103,
+      "mean_holdout": 0.7099104486403394,
+      "mean_llm_tokens": 0.0,
+      "mean_wall_seconds": 82.33,
+      "runs": 1,
+      "system": "budgetlab",
+      "task_id": "bank_marketing"
+    }
+  ],
+  "paired": [
+    {
+      "delta_holdout_per_1k_tokens": null,
+      "losses": 0,
+      "mean_delta_experiments": -10.0,
+      "mean_delta_fits": -50.0,
+      "mean_delta_holdout": 0.0,
+      "mean_delta_wall_seconds": -27.909999999999997,
+      "mean_llm_tokens": 0.0,
+      "pairs": 1,
+      "reference": "random_search",
+      "std_delta_holdout": null,
+      "system": "budgetlab_no_schedule",
+      "task_id": "bank_marketing",
+      "ties": 1,
+      "wins": 0
+    },
+    {
+      "delta_holdout_per_1k_tokens": null,
+      "losses": 0,
+      "mean_delta_experiments": -6.0,
+      "mean_delta_fits": -30.0,
+      "mean_delta_holdout": 0.0,
+      "mean_delta_wall_seconds": -14.409999999999997,
+      "mean_llm_tokens": 0.0,
+      "pairs": 1,
+      "reference": "random_search",
+      "std_delta_holdout": null,
+      "system": "budgetlab",
+      "task_id": "bank_marketing",
+      "ties": 1,
+      "wins": 0
+    }
+  ],
+  "reference": "random_search"
+}

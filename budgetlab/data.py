@@ -23,7 +23,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 
 from .contracts import stable_hash
 from .ledger import atomic_write_json
-from .tasks import get_task
+from .tasks import get_task, register_data_root
 
 ROW_ID = "__row_id__"
 
@@ -61,6 +61,7 @@ def _write_frame(frame: pd.DataFrame, path: Path) -> None:
 
 def prepare_task(task_id: str, data_root: Path, *, force: bool = False) -> dict[str, Any]:
     """Split the raw dataset once into development data and a sealed stratified holdout."""
+    register_data_root(data_root)
     task = get_task(task_id)
     dev_path = development_path(data_root, task_id)
     holdout_path = sealed_holdout_path(data_root, task_id)
@@ -102,6 +103,7 @@ def prepare_task(task_id: str, data_root: Path, *, force: bool = False) -> dict[
 
 def load_development(task_id: str, data_root: Path) -> DatasetBundle:
     """Load development rows only. Holdout rows are not in this file."""
+    register_data_root(data_root)
     task = get_task(task_id)
     path = development_path(data_root, task_id)
     if not path.exists():

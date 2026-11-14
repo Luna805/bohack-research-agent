@@ -24,12 +24,26 @@ def _git(root: Path, *args: str, strip: bool = True) -> str | None:
     return completed.stdout.strip() if strip else completed.stdout
 
 
+# Outputs and prose never change behaviour, so they do not make a checkout "dirty".
+NON_CODE_PREFIXES = ("results/", "docs/")
+NON_CODE_SUFFIXES = (".md",)
+
+
+def _affects_code(path: str) -> bool:
+    path = path.strip().strip('"')
+    if " -> " in path:  # rename: judge the new path
+        path = path.split(" -> ", 1)[1]
+    return not (path.startswith(NON_CODE_PREFIXES) or path.endswith(NON_CODE_SUFFIXES))
+
+
 def git_info(root: Path) -> dict[str, Any] | None:
     commit = _git(root, "rev-parse", "HEAD")
     if commit is None:
         return None
-    status = _git(root, "status", "--porcelain", "--untracked-files=no", strip=False) or ""
+    # Untracked-but-not-ignored files count too: a new module or config changes behaviour.
+    status = _git(root, "status", "--porcelain", "--untracked-files=all", strip=False) or ""
     changed = [line[3:] for line in status.splitlines() if line.strip()]
+    changed = [path for path in changed if _affects_code(path)]
     return {
         "commit": commit,
         "short": commit[:7],

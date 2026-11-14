@@ -3,6 +3,11 @@
 Each task ships a scenario card (``cards/<task_id>.yaml``) that states the prediction time and
 which fields are available at that time. The card is the trusted source for the approved
 feature list; adapters never decide feature availability on their own.
+
+Built-in tasks live in ``TASKS``. Tasks uploaded through the web page (``upload-*``, see
+``csv_task.py``) live under ``<data_root>/uploads/<task_id>/`` and are found through the data
+roots registered with ``register_data_root`` (``prepare_task`` and ``load_development`` do
+this), falling back to ``<project>/data`` and ``<cwd>/data``.
 """
 
 from __future__ import annotations
@@ -24,6 +29,16 @@ import yaml
 from ..schemas import Metric
 
 CARD_DIR = Path(__file__).parent / "cards"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+UPLOAD_PREFIX = "upload-"
+_DATA_ROOTS: list[Path] = []
+
+
+def register_data_root(data_root: Path) -> None:
+    """Remember a data root so uploaded tasks under it can be resolved by id."""
+    root = Path(data_root).resolve()
+    if root not in _DATA_ROOTS:
+        _DATA_ROOTS.insert(0, root)
 
 
 @dataclass(frozen=True)
@@ -34,9 +49,12 @@ class TaskDefinition:
     holdout_fraction: float
     holdout_seed: int
     load_raw: Callable[[Path], tuple[pd.DataFrame, pd.Series]]
+    card_path: Path | None = None
 
     @property
     def card(self) -> dict[str, Any]:
+        if self.card_path is not None:
+            return _load_card_file(str(self.card_path))
         return load_card(self.task_id)
 
 
@@ -44,6 +62,11 @@ class TaskDefinition:
 def load_card(task_id: str) -> dict[str, Any]:
     path = CARD_DIR / f"{task_id}.yaml"
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+@cache
+def _load_card_file(path: str) -> dict[str, Any]:
+    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
 def field_availability(card: dict[str, Any], columns: list[str]) -> dict[str, str]:
@@ -117,6 +140,72 @@ def _load_bank_marketing(raw_dir: Path) -> tuple[pd.DataFrame, pd.Series]:
     return frame, target
 
 
+# ---------------------------------------------------------------- adult census income (UCI 2)
+
+ADULT_URL = "https://archive.ics.uci.edu/static/public/2/adult.zip"
+ADULT_SHA256 = {
+    "adult.data": "5b00264637dbfec36bdeaab5676b0b309ff9eb788d63554ca0a249491c86603d",
+    "adult.test": "a2a9044bc167a35b2361efbabec64e89d69ce82d9790d2980119aac5fd7e9c05",
+}
+ADULT_COLUMNS = (
+    "age",
+    "workclass",
+    "fnlwgt",
+    "education",
+    "education-num",
+    "marital-status",
+    "occupation",
+    "relationship",
+    "race",
+    "sex",
+    "capital-gain",
+    "capital-loss",
+    "hours-per-week",
+    "native-country",
+    "income",
+)
+
+
+def download_adult(raw_dir: Path) -> tuple[Path, Path]:
+    data_path, test_path = raw_dir / "adult.data", raw_dir / "adult.test"
+    if not (data_path.exists() and test_path.exists()):
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with urllib.request.urlopen(  # noqa: S310 - fixed URL
+                ADULT_URL, timeout=60, context=_ssl_context()
+            ) as response:
+                archive = zipfile.ZipFile(io.BytesIO(response.read()))
+        except OSError as exc:
+            raise RuntimeError(
+                f"download failed ({exc}). Download {ADULT_URL} manually and place adult.data "
+                f"and adult.test in {raw_dir}"
+            ) from exc
+        for name in ADULT_SHA256:
+            (raw_dir / name).write_bytes(archive.read(name))
+    for name, expected in ADULT_SHA256.items():
+        digest = hashlib.sha256((raw_dir / name).read_bytes()).hexdigest()
+        if digest != expected:
+            raise ValueError(f"unexpected {name} hash: {digest}")
+    return data_path, test_path
+
+
+def read_adult_files(data_path: Path, test_path: Path) -> tuple[pd.DataFrame, pd.Series]:
+    """Combine the original train and test files; this project re-splits them itself."""
+    options = dict(names=list(ADULT_COLUMNS), skipinitialspace=True, na_values="?", header=None)
+    train = pd.read_csv(data_path, **options)
+    test = pd.read_csv(test_path, skiprows=1, **options)  # first line is a comment
+    frame = pd.concat([train, test], ignore_index=True).dropna(subset=["income"])
+    labels = frame.pop("income").astype(str).str.strip().str.rstrip(".")
+    unexpected = sorted(set(labels) - {">50K", "<=50K"})
+    if unexpected:
+        raise ValueError(f"unexpected adult income labels: {unexpected}")
+    return frame, (labels == ">50K").astype(int).rename("income")
+
+
+def _load_adult(raw_dir: Path) -> tuple[pd.DataFrame, pd.Series]:
+    return read_adult_files(*download_adult(raw_dir))
+
+
 # ---------------------------------------------------------------- breast cancer (smoke only)
 
 
@@ -136,6 +225,14 @@ TASKS: dict[str, TaskDefinition] = {
         holdout_seed=20261114,
         load_raw=_load_bank_marketing,
     ),
+    "adult": TaskDefinition(
+        task_id="adult",
+        target_column="income",
+        primary_metric="f1_macro",
+        holdout_fraction=0.2,
+        holdout_seed=20261114,
+        load_raw=_load_adult,
+    ),
     "breast_cancer": TaskDefinition(
         task_id="breast_cancer",
         target_column="target",
@@ -147,8 +244,23 @@ TASKS: dict[str, TaskDefinition] = {
 }
 
 
+def upload_dir_for(task_id: str) -> Path | None:
+    roots = [*_DATA_ROOTS, PROJECT_ROOT / "data", Path.cwd() / "data"]
+    for root in roots:
+        candidate = root / "uploads" / task_id
+        if (candidate / "task.json").exists():
+            return candidate
+    return None
+
+
 def get_task(task_id: str) -> TaskDefinition:
-    try:
+    if task_id in TASKS:
         return TASKS[task_id]
-    except KeyError as exc:
-        raise ValueError(f"unknown task: {task_id}; known: {sorted(TASKS)}") from exc
+    if task_id.startswith(UPLOAD_PREFIX):
+        upload_dir = upload_dir_for(task_id)
+        if upload_dir is not None:
+            from .csv_task import load_uploaded_task
+
+            return load_uploaded_task(upload_dir)
+        raise ValueError(f"uploaded task {task_id} not found under any registered data root")
+    raise ValueError(f"unknown task: {task_id}; known: {sorted(TASKS)}")
