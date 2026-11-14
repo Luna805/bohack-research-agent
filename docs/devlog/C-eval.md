@@ -10,6 +10,11 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 16:40–17:20 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`
+- 做了：冻结前修四件事（详见 A、B、D 的日志）：PyArrow 锁定版本、单特征 CSV 崩溃、对话页 LLM 路径、问答 Agent。C 自己的部分：`csv_task.development_rows` / `development_profile`，在注册前复现 `prepare_task` 的开发集，供协议 Agent 起草时使用。
+- 验证：`tests/test_csv_task.py` 新增切分一致性测试（行数、标签、取值逐行相同）；全量测试、ruff 见合并记录。
+- 下一步：19:30 冻结，20:00 打 tag 开跑正式矩阵。
+
 ### 2026-11-14 约 15:35–15:50 · yirran（协调人）+ Claude Code
 - 做了：拉取并检查队友的分支。B 的 `b/engine-stability` 合入 main（`bf4cc72`，CI 通过）；A 的 `a/agent` 合入 main（真实 LLM `qwen3.7-plus`、协议 Agent、`extra_body`）。`configs/benchmark/final.yaml` 改用 A 验证过的设置（tool 模式、单次输出上限 3000、`extra_body: {enable_thinking: false}`、每个 run 60 次请求和 30 万 Token），并按 A 实测的单个 LLM run 约 15 分钟更新了耗时估算：3 次重复串行约 3.3–3.8 小时，可以按任务拆成两个进程并行。HANDOFF 待办表已同步。
 - 验证：main、A、B 模拟合并后，锁定环境 75 passed，ruff 通过；A 分支的 CI 通过。这台 Mac 上没有 `.env`，所以 `final.yaml` 的开跑前检查如实报"没有配置 LLM"。

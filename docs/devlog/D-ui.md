@@ -1,5 +1,10 @@
 # 开发日志 · D · 展示与材料
 
+### 2026-11-14 约 16:50–17:20 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`（代 D 接 LLM 路径，协调人要求）
+- 做了：① 侧边栏加"使用 LLM"开关：`.env` 有 `LLM_MODEL`、`LLM_API_KEY` 且装了 llm 依赖时默认打开，否则灰掉并说明原因（兜底路径不变）。开跑时 `--proposer llm`，配置写到 `ui_state/configs/<task>-llm.yaml`，LLM 预算和设置直接取正式矩阵 `configs/benchmark/final.yaml` 的 overrides（新文件 `budgetlab/ui/llm.py`）。② 上传 CSV：选好目标列和正类后，可以点"让协议 Agent 起草字段可用性"，草稿预填到逐列确认表里，`questions_for_user` 逐条显示；Agent 只看开发数据的画像（C 新增 `development_profile`，和 `prepare_task` 切出的开发集逐行一致），不看 holdout。演示 CSV 同时载入标准答案时，显示 Agent 和标准答案一致几个字段、漏排除了哪些。Token 记到 `ui_state/llm_calls.jsonl`。③ 研究结束后，底部对话框变成"追问"：开放问题交给 A 的问答 Agent，回答下面列出证据引用和逐个数字的核对结果（✅/⚠️），Token 记到 `ui_state/qa_calls.jsonl`，每个会话最多 20 次请求、5 万 Token。④ 研究结束时整页刷新一次，侧边栏会显示"研究已完成"；分数保留 4 位小数；holdout 显示 95% 区间；可用特征下限从 2 改成 1（B 已修引擎）。
+- 验证：锁定环境里页面打开；LLM 开关打开时预算卡片显示 `llm`（qwen3.7-plus，最多 60 次请求、300,000 Token）；关掉后脚本化 Bank 全程跑通。新增 `tests/test_ui_llm.py`。**页面里的真实 LLM 调用还没测**（要花钱，等协调人同意）。
+- 下一步：D 过一遍页面文案；现场演示前用真实 LLM 走一遍上传 → 起草 → 开跑 → 追问。
+
 ### 2026-11-14 · D + Codex · 同步演示数据并核对上传协议
 
 - 做了：在 `d-ui` 合并远端最新 `main`（`9a2ccce`，含 C 的学生预警 CSV）；只对该内置 CSV 增加显式“载入人工标准协议”按钮，仍要求用户核对并确认；步骤卡现在显示每轮两个候选及其假设，并明确标出脚本化提案是 0 Token。

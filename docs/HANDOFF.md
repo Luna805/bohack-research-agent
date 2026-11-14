@@ -9,7 +9,7 @@
 git pull                                         # main = 5c304ea
 uv sync --frozen --extra dev --extra llm --extra ui   # ui 用于对话页（streamlit、plotly）
 python -m budgetlab.cli prepare --task bank_marketing   # 下载 UCI 数据，切出密封 holdout（约 1 MB）
-python -m pytest -q                              # 应为 52 passed（锁定环境，含 ui 依赖）
+python -m pytest -q                              # 应为 90 passed（锁定环境，含 ui 依赖）
 ruff check .
 ```
 
@@ -97,11 +97,11 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 | 2 | 真实接口门禁：`probe-llm` | A | Yolo | ✅ `474b740`（tool 模式通过） | Schema 一次通过，usage 有值 |
 | 3 | 真实 LLM 跑 Bank | A | Yolo | ✅ 两次干净 run，探索最优 0.712，confirmed_pass | 至少 2 轮真实提案→训练→反馈；Token 账目对得上 |
 | 4 | 对照矩阵脚本 `python -m budgetlab.benchmark` | C | yirran | ✅ `165a031` | 产出符合 INTERFACES 第 5 节格式的 `results/<matrix_id>/` |
-| 5 | **对话式研究页 · 主流程**（16:00）：一句话加数据 → 协议卡片确认 → 开跑，步骤卡片流式显示 → 总结、holdout、快捷问答；含无 LLM 兜底路径 | D（牵头）、A、C | chier1 | 🔄 第一版已合入 `5c304ea` | TEAM.md 4.4 的 16:00 验收（两条路径） |
-| 5b | **对话式研究页 · 完善**（19:30）：开放问答、用一句话修改协议、CSV 上传、对比页签 | D、A、C | chier1 | 待开始 | TEAM.md 4.4 的 19:30 验收 |
+| 5 | **对话式研究页 · 主流程**（16:00）：一句话加数据 → 协议卡片确认 → 开跑，步骤卡片流式显示 → 总结、holdout、快捷问答；含无 LLM 兜底路径 | D（牵头）、A、C | chier1 | ✅ D 的版本已合入 `32d0696`；LLM 路径已接（侧边栏开关，`c/pre-freeze-fixes`）。**页面里的真实 LLM 走查待做** | TEAM.md 4.4 的 16:00 验收（两条路径） |
+| 5b | **对话式研究页 · 完善**（19:30）：开放问答、用一句话修改协议、CSV 上传、对比页签 | D、A、C | chier1 | 🔄 CSV 上传、开放问答已接入（`c/pre-freeze-fixes`）；用一句话修改协议未做 | TEAM.md 4.4 的 19:30 验收 |
 | 6 | README、PPT、项目说明、录屏 | D（全员配合） | chier1 | 待开始 | 数字全部来自 `results/` |
-| 7 | 协议 Agent `DraftProtocol` | A | Yolo | ✅ 代码已合入（`budgetlab/agents/protocol_agent.py`），Bank 20/20 首次全对；**接进 D 的对话页还没做** | Bank 上能正确排除 `duration`；记录首次正确率和成本 |
-| 8 | 问答 Agent `budgetlab/qa/agent.py` | A | Yolo | 待开始（D 的 `qa/` 已在 main，可以直接开始） | 回答附证据，数字可核对，计量独立 |
+| 7 | 协议 Agent `DraftProtocol` | A | Yolo | ✅ 代码已合入（`budgetlab/agents/protocol_agent.py`），Bank 20/20 首次全对；已接进对话页：上传 CSV 时起草，只看开发数据（`c/pre-freeze-fixes`） | Bank 上能正确排除 `duration`；记录首次正确率和成本 |
+| 8 | 问答 Agent `budgetlab/qa/agent.py` | A | Yolo | ✅ 协调人代写 `budgetlab/qa/agent.py`，已接进对话页（`c/pre-freeze-fixes`） | 回答附证据，数字可核对，计量独立 |
 | 9 | 通用 CSV 适配器 `budgetlab/tasks/csv_task.py` | C | yirran | ✅ `0ce4c7c` | 新的二分类 CSV 能 register → prepare → 跑通 |
 | 10 | 第二个任务（改为 UCI Adult，不做 MLE-bench） | C | yirran | ✅ `c71a56f` | 场景卡 + prepare + 小矩阵能跑通 |
 | 11 | 正式矩阵准备：LLM 开跑前检查、`final.yaml` 和 `final-scripted.yaml` | C | yirran | ✅ 已按 A 的设置更新（输出上限 3000、关闭思考、每个 run 60 次请求和 30 万 Token） | `--dry-run` 能给出检查结果 |
@@ -111,7 +111,8 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 | 16 | holdout 置信区间与配对 bootstrap | C | yirran | ✅（`c/holdout-ci`，待推送） | `final_evaluation.json` 有 `holdout_ci95`；`comparison.json` 有配对区间 |
 | 15 | **正式矩阵运行**（19:30 冻结、20:00 打 tag 开跑） | C | yirran | 待 20:00 | `results/final-*` 提交，代码版本非 dirty |
 | P1 | `LLMSettings` 支持 `extra_body` | A | Yolo | ✅ 已合入 | 关闭思考模式 |
-| P1 | 经验库 `budgetlab/memory/` | B | Luna805 | 🔄 进行中（`b/memory`，尚未提交） | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |
+| 17 | 冻结前修复：PyArrow 锁定版本（页面打不开）、单特征 CSV 崩溃 | B（协调人代修） | yirran | ✅（`c/pre-freeze-fixes`） | 锁定环境能打开页面；单特征 CSV 能跑完 |
+| P1 | 经验库 `budgetlab/memory/` | B | Luna805 | ⏸ 冻结前不合入（协调人决定）；本地 `b/memory` 有 1 个未推送的提交 | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |
 
 对话式研究页的流程和约束见 TEAM.md 第 4 节；时间线和合流点见第 5 节：13:00、16:00 两次合流；19:30 代码冻结；20:00 打 tag 并开跑正式矩阵。
 

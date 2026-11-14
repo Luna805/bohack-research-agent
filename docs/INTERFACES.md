@@ -287,6 +287,7 @@ validate_csv_for_task(csv_path, target_column) -> list[str]   # 上传后、起�
 register_csv_task(csv_path, card: dict, data_root) -> str     # 人确认协议后调用；返回 "upload-<10位哈希>"
 config_for_upload(task_id, base_config: dict) -> dict          # 基于某个配置（如 configs/bank_marketing.yaml）换成这个任务
 class CsvTaskError(ValueError): reasons: list[str]             # register 失败时一次性给出全部理由（中文，可直接展示）
+development_profile(csv_path, target_column, positive_label) -> tuple[list[str], dict]  # 注册前复现 prepare_task 的开发集并做画像，给协议 Agent 用（不含 holdout 行）
 ```
 
 D 的调用顺序：
@@ -337,7 +338,9 @@ QUICK_QUESTIONS: list[str]
 answer_quick(question_id, run_id) -> QAAnswer
 
 # budgetlab/qa/agent.py （A）
-answer_open(question: str, run_id: str, history: list[dict]) -> tuple[QAAnswer, CallOutcome]
+answer_open(question: str, run_id: str, history: list[dict], *,
+            store: EvidenceStore, settings: LLMSettings, model=None) -> tuple[QAAnswer, CallOutcome]
+# 程序先用上面的只读工具收集证据，再发 1 次请求；引用核对和数字核对都由程序完成
 ```
 
 ```python

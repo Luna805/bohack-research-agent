@@ -21,6 +21,11 @@
 - 问题：…
 - 下一步：…
 -->
+### 2026-11-14 约 16:45–17:00 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`（代 A 写问答 Agent，协调人要求）
+- 做了：新建 `budgetlab/qa/agent.py`：`answer_open(question, run_id, history, *, store, settings, model=None) -> (QAAnswer, CallOutcome)`。程序先通过 D 的只读 `EvidenceStore` 收集证据（summary、实验行、每个实验后的最优分、各轮提案、LLM 调用记录、已评测时的 holdout），压成一个上下文，只发 1 次请求（复用 `_PydanticAIRole` 的计量，输出上限 1200）。模型只返回回答和引用；程序删掉不存在的引用（例如编造的实验 id、没评测时引用 holdout），并从回答里抽出数字逐个在证据里核对，填 `verified_numbers`。`QAAnswer`、`EvidenceRef` 按 INTERFACES 8.4 定义在 `budgetlab/qa/__init__.py`。
+- 验证：`tests/test_qa_agent.py` 4 个离线测试（FunctionModel，不联网）：数字核对、假引用被删、没评测时不能引用 holdout、模型出错时如实报错。
+- 下一步：现场用真实模型问几个问题，看回答长度和 Token（预计每问 6–10k 输入 Token）。
+
 ### 2026-11-14 约 12:10–12:30 · chier1 + Claude Code
 - 做了：补跑第 3 次 Bank run（上次 `034204Z` 因内存不足被 Claude Code 回收 `status: killed`，无 summary）；这次单独重跑，不并发其它重活。
 - 验证：`20261114T041641Z-budgetlab-6703b2` → 6 轮 0 空轮、0 invalid、0 重复拦截、探索最优 0.712（基线 0.641）、`confirmed_pass`、`diminishing_returns` 提前收敛，64.6k tokens / 929s。

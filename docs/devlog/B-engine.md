@@ -2,6 +2,11 @@
 
 新的写在最上面。每条包含：时间、谁（人或代理）、做了什么、怎么验证的（命令或 run_id）、遇到的问题、下一步。
 
+### 2026-11-14 约 16:40–17:05 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`（代 B 修，协调人要求）
+- 做了：① `pyproject.toml` 的 `ui` 加 `pyarrow>=14,<26` 并重新锁定：锁文件里原来是 PyArrow 26.0.1，它要求 NumPy ≥ 2，而我们固定 1.26.4，`uv sync --frozen --extra ui` 装出来的页面一打开就报错（CI 不装 ui，所以没发现）。重锁后只有 pyarrow 一项变化（26.0.1 → 25.0.1）。② `search.SpecSampler._actions`：只有合法列多于 1 个时才提供 drop 动作。原来上传的 CSV 只有 1 个可用特征时，tool search 和 random_search 会把唯一的列删掉，`validate_experiment_spec` 报 `feature actions drop every approved column`，整个 run 崩掉。随机数的消耗顺序没变，Bank、Adult 的采样序列和以前完全一样。
+- 验证：干净锁定环境里 `import pyarrow` 正常、页面能打开；新增 `tests/test_search_sampler.py`（去掉修复会失败）；单特征 CSV 端到端跑 budgetlab 和 random_search 都通过。
+- 下一步：B 复核一下即可，不需要再改。
+
 ### 2026-11-14 · Codex · P0 最终本地验证
 - 做了：修正旧 LLM 集成测试夹具，使正常候选只引用真实存在的 `best` 和 `eda`；非法或部分无效证据仍由 `test_engine_loop.py` 独立覆盖。生产逻辑保持“所有 evidence_refs 必须有效”。
 - 验证：`python -m uv sync --frozen --extra dev --extra llm` 成功；`python -m uv run --frozen pytest -q` 为 48 passed；`python -m uv run --frozen ruff check budgetlab tests` 和 `python -m uv run --frozen ruff format --check budgetlab tests` 通过。Bank 回归：`20261114T053208Z-random_search-3ab851`（experiment_limit，confirmed_pass，18 个实验）、`20261114T053820Z-budgetlab_no_schedule-e4a74b`（no_valid_candidates，confirmed_pass，8 个实验）、`20261114T054255Z-budgetlab-667a98`（no_valid_candidates，confirmed_pass，12 个实验）。三者均 0 failed experiments、0 LLM requests、0 reserved reservations，预算未超限，最终事件为 run_terminal，冻结模型 SHA256 匹配。
