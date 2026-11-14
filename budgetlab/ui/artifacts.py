@@ -27,7 +27,7 @@ _FINAL_FILES = (
     ("summary.json", "运行汇总", "基线、交付分数、预算和停止原因"),
     ("confirmation.json", "新切分复核", "交付模型在新的随机切分上是否仍优于基线"),
     ("delivery/frozen_delivery.json", "交付模型冻结记录", "配置哈希和重新训练的数据"),
-    ("final_evaluation.json", "Holdout 评测", "封存数据上的一次性评测结果"),
+    ("final_evaluation.json", "最终测试", "独立测试集上的一次性检验结果"),
     ("report.md", "研究报告", "本次研究的完整报告"),
 )
 

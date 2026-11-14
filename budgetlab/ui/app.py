@@ -37,7 +37,7 @@ from budgetlab.ui.artifacts import (
     resolve_artifact,
     run_dir,
 )
-from budgetlab.ui.insights import cycle_status
+from budgetlab.ui.insights import cycle_status, experiment_label, experiment_rows, read_json
 from budgetlab.ui.llm import llm_problem, llm_settings, log_call, research_config
 from budgetlab.ui.presentation import artifact_preview, event_card, load_matrix, trajectory_rows
 from budgetlab.ui.workspace import render_branch_map, render_result_panel, render_token_panel
@@ -60,12 +60,12 @@ def fmt(value: object, digits: int = 4) -> str:
     return f"{value:.{digits}f}" if isinstance(value, int | float) else "—"
 
 
-def holdout_text(evaluation: dict) -> str:
-    text = f"Holdout：{fmt(evaluation.get('holdout_score'))}"
+def final_test_text(evaluation: dict) -> str:
+    text = f"独立测试集分数：{fmt(evaluation.get('holdout_score'))}"
     interval = evaluation.get("holdout_ci95")
     if interval and len(interval) == 2:
         text += f"（95% 区间 {fmt(interval[0])}–{fmt(interval[1])}）"
-    return text + "，已评测"
+    return text + "，最终测试已完成"
 
 
 def read_events(run_dir: Path) -> list[dict]:
@@ -105,8 +105,7 @@ def launch(task_id: str, config_path: Path, proposer: str) -> dict:
     command = [
         sys.executable,
         "-m",
-        "budgetlab.cli",
-        "research",
+        "budgetlab.ui.research_job",
         "--config",
         str(config_path),
         "--system",
@@ -129,6 +128,7 @@ def launch(task_id: str, config_path: Path, proposer: str) -> dict:
         "run_id": None,
         "task_id": task_id,
         "proposer": proposer,
+        "auto_final_test": True,
     }
 
 
@@ -153,9 +153,8 @@ def evaluate_run(run_id: str) -> str | None:
         [
             sys.executable,
             "-m",
-            "budgetlab.cli",
-            "evaluate",
-            "--run-id",
+            "budgetlab.ui.research_job",
+            "--evaluate-run-id",
             run_id,
             "--runs-root",
             str(RUNS),
@@ -166,6 +165,52 @@ def evaluate_run(run_id: str) -> str | None:
         check=False,
     )
     return result.stderr[-1000:] if result.returncode else None
+
+
+def show_final_test(run_id: str, *, key: str, job: dict | None = None) -> None:
+    """Explain the final check; only legacy runs and failures need a manual action."""
+    st.markdown("#### 最终测试")
+    st.caption(
+        "用训练和选模型时未使用的独立测试集，检验最终模型对新样本的表现。"
+        "每次研究仅测试一次，结果不再用于调参。"
+    )
+    evaluation = STORE.get_final_evaluation(run_id)
+    state = read_json(RUNS / run_id / "ui_final_test.json")
+    status = "completed" if evaluation else state.get("status")
+    if job and job.get("auto_final_test") and status in {"completed", "failed"}:
+        if job.get("final_test_seen") != status:
+            job["final_test_seen"] = status
+            st.rerun()
+    if evaluation:
+        st.write(final_test_text(evaluation))
+        return
+    process_running = job is not None and job["process"].poll() is None
+    if (job and job.get("auto_final_test") and process_running) or (
+        status == "running" and job is None
+    ):
+        st.info("模型已确定，正在自动完成最终测试……")
+        return
+    interrupted = status in {"running", "failed"} or (job and job.get("auto_final_test"))
+    if interrupted:
+        st.warning("模型研究已完成，但最终测试尚未完成。可在下方查看原因并重试。")
+    else:
+        st.info("这条旧研究记录尚未进行最终测试。新启动的研究会自动完成这一步。")
+    with st.expander("查看原因与重试" if interrupted else "补充这条旧记录的最终测试"):
+        if state.get("error"):
+            st.error(state["error"])
+        st.caption("仅测试已经确定的模型，不会重新训练或修改研究方案。")
+        if st.button("重试最终测试" if interrupted else "测试已确定的模型", key=key):
+            with st.spinner("正在测试最终模型……"):
+                error = evaluate_run(run_id)
+            if error:
+                st.error(error)
+            else:
+                st.rerun()
+
+
+@st.fragment(run_every="2s")
+def show_saved_final_test(run_id: str, *, key: str) -> None:
+    show_final_test(run_id, key=key)
 
 
 def show_timeline(cards: list[dict], run_dir: Path, *, key: str) -> None:
@@ -265,7 +310,6 @@ def show_quick_questions(run_id: str, *, key: str) -> None:
 def reset_task_draft() -> None:
     for key in (
         "request",
-        "protocol_confirmed",
         "upload",
         "custom_task",
         "upload-target",
@@ -370,7 +414,7 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
         if draft is not None:
             st.info(
                 f"下表预填了协议 Agent 的草稿（LLM，{draft['tokens']:,} Token）。"
-                "它只看了开发数据的字段画像，没有看 holdout。请逐列核对后再确认。"
+                "它只看了开发数据的字段画像，没有看独立测试集。请逐列核对后再确认。"
             )
             if draft["target_column"] != target_column:
                 st.warning(f"Agent 认为目标列是 {draft['target_column']}，请核对。")
@@ -472,7 +516,6 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
             )
             st.session_state["custom_task"] = (task_id, str(config_path))
             st.session_state.pop("upload", None)
-            st.session_state["protocol_confirmed"] = True
             st.rerun()
 
 
@@ -498,7 +541,7 @@ def show_active_run() -> None:
 
     events = read_events(run_dir)
     st.caption(f"研究编号：{run_dir.name} · 已记录 {len(events)} 条事件")
-    render_branch_map(run_dir)
+    render_branch_map(run_dir, running=job["process"].poll() is None)
     if not (run_dir / "summary.json").is_file():
         if job["process"].poll() is None:
             st.info("研究仍在进行；分岔图与侧栏进度每 2 秒自动更新。")
@@ -515,11 +558,19 @@ def show_active_run() -> None:
         job["finished_seen"] = True
         st.rerun()
     summary = STORE.get_summary(run_dir.name)
+    delivered_row = next(
+        (
+            row
+            for row in experiment_rows(run_dir, summary, events)
+            if row["id"] == summary.get("delivered_experiment_id")
+        ),
+        {"id": summary.get("delivered_experiment_id", "")},
+    )
     with st.chat_message("assistant"):
         st.write("### 研究结论")
         st.write(
             f"开发集：基线 {fmt(summary.get('baseline_score'))} → 交付模型 "
-            f"{fmt(summary.get('delivered_dev_score'))}（{summary.get('delivered_experiment_id')}）"
+            f"{fmt(summary.get('delivered_dev_score'))}（{experiment_label(delivered_row)}）"
         )
         st.write(
             f"确认状态：{summary.get('confirmation_status')}；"
@@ -533,14 +584,7 @@ def show_active_run() -> None:
             )
         else:
             st.caption("数值来自本次 run 的 summary.json；本次提案为脚本化，未使用 LLM。")
-        evaluation = STORE.get_final_evaluation(run_dir.name)
-        if evaluation:
-            st.write(holdout_text(evaluation))
-        elif st.button("运行一次 holdout 评测", key=f"evaluate-{run_dir.name}"):
-            if error := evaluate_run(run_dir.name):
-                st.error(error)
-            else:
-                st.rerun(scope="fragment")
+        show_final_test(run_dir.name, key=f"evaluate-{run_dir.name}", job=job)
 
     show_quick_questions(run_dir.name, key=f"faq-{run_dir.name}")
 
@@ -824,9 +868,18 @@ with left_col:
             st.caption(f"运行中 · {active.get('run_id') or '启动中'}")
             active_run_id = active.get("run_id")
             if active_run_id and (RUNS / active_run_id / "summary.json").is_file():
-                st.success("研究已完成")
-                if st.button("开始另一个任务"):
-                    for key in ("job", "request", "protocol_confirmed", "qa_pending"):
+                final_ready = (RUNS / active_run_id / "final_evaluation.json").is_file()
+                testing = active.get("auto_final_test") and not final_ready
+                if testing and active["process"].poll() is None:
+                    st.info("模型已确定，正在完成最终测试")
+                elif testing:
+                    st.warning("模型研究已完成，最终测试未完成")
+                else:
+                    st.success("研究已完成")
+                if st.button(
+                    "开始另一个任务", disabled=bool(testing and active["process"].poll() is None)
+                ):
+                    for key in ("job", "request", "qa_pending"):
                         st.session_state.pop(key, None)
                     st.rerun()
         selected_run_id = (
@@ -885,7 +938,7 @@ with center_col:
                 st.dataframe(
                     [{key: row.get(key) for key in columns} for row in rows],
                     hide_index=True,
-                    alt="各研究系统的开发集、holdout 分数和运行成本对比",
+                    alt="各研究系统的开发集、独立测试集分数和运行成本对比",
                 )
                 run_options = [row["run_id"] for row in valid if row.get("run_id")]
                 if run_options:
@@ -942,14 +995,7 @@ with center_col:
                     st.metric(
                         "确认状态", history_summary.get("confirmation_status", "未知"), border=True
                     )
-                evaluation = STORE.get_final_evaluation(history_id)
-                if evaluation:
-                    st.write(holdout_text(evaluation))
-                elif st.button("运行一次 holdout 评测", key=f"history-evaluate-{history_id}"):
-                    if error := evaluate_run(history_id):
-                        st.error(error)
-                    else:
-                        st.rerun()
+                show_saved_final_test(history_id, key=f"history-evaluate-{history_id}")
                 show_quick_questions(history_id, key=f"history-faq-{history_id}")
             else:
                 st.info("这次研究还没有最终汇总，可能正在运行，也可能已中断。步骤仍可查看。")
@@ -960,7 +1006,9 @@ with center_col:
         if "request" not in st.session_state:
             with st.container(border=True):
                 st.subheader("快速演示")
-                st.write("选择示例任务，或在下方对话框附上二分类 CSV。确认协议后再启动研究。")
+                st.write(
+                    "选择示例任务，或在下方对话框附上二分类 CSV。示例任务自动采用已有任务说明。"
+                )
                 if st.button("用所选示例开始", type="primary"):
                     st.session_state["request"] = protocol_card(task_id)["business_question"]
                     st.rerun()
@@ -992,7 +1040,6 @@ with center_col:
                 }
                 st.session_state["request"] = st.session_state["upload"]["request"]
                 st.session_state.pop("custom_task", None)
-                st.session_state.pop("protocol_confirmed", None)
                 for key in (
                     "upload-target",
                     "upload-positive",
@@ -1018,9 +1065,9 @@ with center_col:
         config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         with st.chat_message("assistant"):
             if task_id.startswith("upload-"):
-                st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
+                st.write("以下是已保存的 CSV 任务说明，研究将使用这些设置。")
             else:
-                st.write("请确认研究方案。以下是该示例的任务说明。")
+                st.write("已采用该示例的任务说明，可直接准备数据并开始研究。")
             st.write(f"**任务：** {card['title']}")
             st.write(f"**预测时点：** {card['prediction_time']}")
             st.write(
@@ -1057,9 +1104,6 @@ with center_col:
                     st.write("这个示例的所有数据列都可以用来预测。")
                 else:
                     st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
-            confirmed = st.checkbox(
-                "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
-            )
 
         with st.chat_message("assistant"):
             run_config = research_config(config, proposer, ROOT)
@@ -1077,13 +1121,14 @@ with center_col:
                 f"**研究预算：** 最多 {budget['max_experiments']} 次实验；"
                 f"系统 `budgetlab`，{source}。"
             )
+            st.caption("开始后自动完成模型研究和独立测试集上的最终测试。")
             ready = (DATA / "prepared" / task_id / "development.csv").is_file()
             if not ready:
                 st.warning(
                     "当前任务数据尚未准备。Bank 和 Adult 首次准备需下载数据；"
                     "Breast Cancer 可离线准备。"
                 )
-                if st.button("准备示例数据", disabled=not confirmed):
+                if st.button("准备示例数据"):
                     result = subprocess.run(
                         [
                             sys.executable,
@@ -1104,9 +1149,7 @@ with center_col:
                         st.error(result.stderr[-1000:])
                     else:
                         st.rerun()
-            if st.button(
-                "开始研究", disabled=not confirmed or not ready or bool(st.session_state.get("job"))
-            ):
+            if st.button("开始研究", disabled=not ready or bool(st.session_state.get("job"))):
                 st.session_state["job"] = launch(task_id, config_path, proposer)
                 st.rerun()
 

@@ -71,19 +71,28 @@ reasons, trigger source), `experiments/<id>.json` (spec, result, all verdicts, l
 
 Install the optional UI dependencies with `uv sync --frozen --extra dev --extra llm --extra ui`,
 then run `uv run streamlit run budgetlab/ui/app.py`. Choose Bank Marketing, Adult Income,
-or the offline Breast Cancer smoke task, confirm its protocol card, prepare the data,
-and start research. Bank and Adult preparation download public data on first use.
+or the offline Breast Cancer smoke task, prepare the data, and start research. Built-in
+tasks use their existing protocol cards automatically; the settings remain visible without
+a separate confirmation checkbox. Bank and Adult preparation download public data on first use.
 You can also attach a binary-classification CSV in the chat, select its target and positive
 class, and confirm each field's availability before preparing a local task. The page labels
 scripted proposals as **not using an LLM**. Every score
-is read from the run artifacts. Holdout scoring requires a separate button and can run once.
+is read from the run artifacts. New page runs automatically test the frozen model once on
+an independent holdout in the same background job, then show the result as **最终测试**.
+Refreshing the page only reads the saved result. Older unevaluated records have an explained,
+optional final-test action inside an expander; failed final tests offer an explicit retry.
 For a quick demonstration, select an example and click **用所选示例开始**. After a run finishes,
 click **开始另一个任务** to clear the page state without deleting the saved evidence.
 The left research directory can reopen a local run after a browser refresh, including one
 without a final summary. It shows recorded LLM tokens by role and call; unknown usage stays
 separate. The center has the conversation and an experiment branch map based on saved run
-evidence. The right panel shows development scores, research stages, confirmation and holdout
-status. While a new run is active, step cards update every two seconds. The system comparison
+evidence. The active experiment and its ancestor path light up blue, following recorded
+execution changes every two seconds; other branches dim. Completed runs highlight the final
+delivered path in green. Nodes use readable round/scheme names and show their development
+scores. Only the filled green diamond is the delivered model; outlined ancestors are comparison
+steps. Candidate details explain why an improved scheme was not selected, using recorded scores
+and confirmation results. Technical IDs remain in the expandable evidence details.
+The right panel shows development scores, research stages, confirmation and holdout status. While a new run is active, step cards update every two seconds. The system comparison
 view reads the newest `results/final-*` matrix, or labels `results/dev-*` as development data
 when no formal matrix is available.
 For a repeatable upload demo, attach `examples/student_risk/student_risk.csv` and use the
