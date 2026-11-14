@@ -2,7 +2,8 @@
 
 BudgetLab 是一个预算感知、证据约束的表格分类 Research Agent：LLM 每轮提出两个受控实验假设，其余由程序负责，包括训练、指标、裁决、预算、停止、确认、冻结交付和 holdout 评测。
 
-- 当前进度、分工和待办：`docs/HANDOFF.md`（开始工作前先读）
+- 当前进度和待办：`docs/HANDOFF.md`（开始工作前先读）
+- **四人分工、文件归属、时间线**：`docs/TEAM.md`；**模块接口**：`docs/INTERFACES.md`
 - 设计依据：`BoHack2026_Research_Agent_最终方案_v3.md`
 - 提交截止：2026-11-15 08:00（北京时间）
 
@@ -43,20 +44,23 @@ ruff check . && ruff format --check budgetlab tests
 
 ## Git 与协作
 
-- 在短分支上开发：`<名字>/<主题>`，例如 `luna/benchmark`。合并前先 `git pull --rebase origin main`，合进 `main` 后删除分支。`main` 必须始终能跑演示。
+- 在短分支上开发：`<角色>/<主题>`，例如 `c/benchmark`。合并前先 `git pull --rebase origin main`，合进 `main` 后删除分支。`main` 必须始终能跑演示。不要在 GitHub 网页上传文件。
 - 小步提交，提交信息用英文祈使句（例如 `Add benchmark runner`）。禁止 `push --force` 到 `main`。
 - 不要提交 `data/`、`runs/`、`.env`、`.venv/`；不要提交任何密钥。
-- 按文件分工（见 HANDOFF 第 4 节）。要改别人负责的文件，先在群里说一声。
+- 按文件归属分工（见 `docs/TEAM.md` 第 2 节）。要改别人负责的文件，先在群里说一声。新命令做成独立入口（`python -m budgetlab.<模块>`），不往 `cli.py` 里加；依赖只由 B 修改。
+- 修改 `docs/INTERFACES.md` 里的接口时：只加字段，不改名或删字段；破坏性修改要先在群里说并提升版本号。
 - 正式对照矩阵开跑前，在当时的提交上打 tag `benchmark-freeze`；之后代码和配置不再改动。每个 run 的 `run_config.json` 会自动记录 git 提交号和是否有未提交的改动。
-- 正式结果只在一台机器上跑；跑完只把精简结果（`summary.json`、`final_evaluation.json`、`report.md`）复制到 `results/<run_id>/` 并提交，不提交模型文件。
+- 正式结果只在一台机器上跑；格式见 `docs/INTERFACES.md` 第 5 节（`results/<matrix_id>/`），不提交模型文件。
 
 ## 结束一次工作时
 
-1. 在 `docs/HANDOFF.md` 的"开发日志"里追加一条：时间、谁（人或代理）、做了什么、怎么验证的（命令、run_id）、遇到的问题、下一步。
-2. 进度表或待办状态有变化，同步更新 HANDOFF 第 1、4 节。
+1. 在自己角色的 `docs/devlog/<角色>.md` 里追加一条：时间、谁（人或代理）、做了什么、怎么验证的（命令、run_id）、遇到的问题、下一步。
+2. 在群里说一句「已合入 xxx，影响 yyy」。`docs/HANDOFF.md` 的进度表只由协调人更新。
 
 ## 对 AI 代理的额外要求
 
 - 只有在配置里 LLM 预算为正数、并且用户明确要求时，才能发真实 LLM 请求；不要读取或打印 `.env` 里的值。
 - 不要伪造或手填任何指标；跑不出来就如实写"未完成"。
+- 只改你所属角色的文件（`docs/TEAM.md` 第 2 节）；用户没说角色时先问清楚。
 - 没有用户要求时不要提交或推送；推送前确认 CI 能通过。
+- 本地环境可能比锁定环境多装了包，所以「本地能过」不代表 CI 能过；有疑问时用 `uv sync --frozen` 建的干净环境复现。

@@ -15,6 +15,7 @@ def test_scripted_loop_real_training_holdout_reproduce_and_replay(
     run_id = summary["run_id"]
     run_dir = tmp_path / "runs" / run_id
     assert summary["proposal_source"] == "scripted"
+    assert summary["summary_version"] == 1
     assert summary["counts"]["rounds"] >= 1
     assert summary["counts"]["proposer_experiments"] >= 2
     assert summary["counts"]["tool_search_experiments"] >= 1

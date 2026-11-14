@@ -76,6 +76,8 @@ from .state import ExperimentRecord, ResearchState, RoundRecord
 from .tasks import approved_features, get_task
 
 SYSTEMS = ("random_search", "budgetlab_no_schedule", "budgetlab")
+# Bump only for breaking changes to summary.json; see docs/INTERFACES.md section 1.
+SUMMARY_VERSION = 1
 EVIDENCE_EXTRAS = ("eda", "calibration", "scenario_card")
 
 
@@ -928,6 +930,7 @@ def _summary(
     budget = ctx.budget.summary()
     run_config = json.loads((ctx.run_dir / "run_config.json").read_text(encoding="utf-8"))
     return {
+        "summary_version": SUMMARY_VERSION,
         "run_id": ctx.run_id,
         "system": ctx.system,
         "task_id": ctx.contract.task_id,
