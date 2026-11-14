@@ -10,6 +10,12 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 15:35–15:50 · yirran（协调人）+ Claude Code
+- 做了：拉取并检查队友的分支。B 的 `b/engine-stability` 合入 main（`bf4cc72`，CI 通过）；A 的 `a/agent` 合入 main（真实 LLM `qwen3.7-plus`、协议 Agent、`extra_body`）。`configs/benchmark/final.yaml` 改用 A 验证过的设置（tool 模式、单次输出上限 3000、`extra_body: {enable_thinking: false}`、每个 run 60 次请求和 30 万 Token），并按 A 实测的单个 LLM run 约 15 分钟更新了耗时估算：3 次重复串行约 3.3–3.8 小时，可以按任务拆成两个进程并行。HANDOFF 待办表已同步。
+- 验证：main、A、B 模拟合并后，锁定环境 75 passed，ruff 通过；A 分支的 CI 通过。这台 Mac 上没有 `.env`，所以 `final.yaml` 的开跑前检查如实报"没有配置 LLM"。
+- 问题：①下午这台 Mac 用电池、Docker 虚拟机又占着 CPU，训练慢了 2–5 倍；接上电源后恢复，但 Docker 仍占约 29% CPU，跑正式矩阵前要退出。②本地文件夹被做经验库的会话占用（`b/memory`，改动未提交），协调人的合并都在独立 worktree 里进行。
+- 下一步：把 Key 配到正式矩阵用的机器上，在这台机器上先测一个真实 LLM run 的耗时，再定重复次数和是否并行（19:00）。
+
 ### 2026-11-14 约 13:40–13:53 · yirran + Claude Code（分支 `c/demo-csv`）
 - 做了：演示数据 `examples/student_risk/`，用 UCI Student Performance 的葡语课程数据做"学年初预测期末不及格"：649 人，100 人不及格，CC BY 4.0。CSV **有意保留了 G1、G2、G3**（`build_demo_csv.py` 会下载、校验哈希后重新生成）。`card.yaml` 是标准答案：必须排除 G1、G2、G3，`absences` 是边界情况（统计的是本学年缺勤）。README 写了对话里的一句话描述、给 A 的打分规则和用法。TEAM 和 INTERFACES 8.1 已加上指引。
 - 验证：新增离线测试，用标准答案注册后恰好排除这 4 列；`test_csv_task.py` 7 个测试通过；ruff 通过。实跑（scripted，budgetlab，各 1 次）：正确协议的 holdout 是 0.649（0.551–0.745），只排除 G3 时是 0.890，所有字段都可用时是 1.000；每次约 20 秒。协议越错，分数越"好看"，适合现场演示"任务理解"的价值。

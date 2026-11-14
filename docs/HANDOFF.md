@@ -1,6 +1,6 @@
 # BudgetLab 交接说明
 
-> 更新：2026-11-14 13:55（北京时间）· main = `5c304ea`· 提交截止 11/15 08:00
+> 更新：2026-11-14 15:50（北京时间）· main = 合入 A 和 B 之后
 > 开发规范见仓库根目录 [`AGENTS.md`](../AGENTS.md)（人和 AI 代理共用，Claude Code 通过 `CLAUDE.md` 自动读取）。
 
 ## 0. 先做这几件事
@@ -25,7 +25,7 @@ ruff check .
 | W02 预算与账本 | ✅ | 新增 `Budget.can_reserve()`（只试算，不改状态）和 `remaining()` |
 | W03 数据与隔离 | ✅ | 任务适配器、场景卡、`prepare` 切出密封 holdout、开发集画像 `eda.json` |
 | W04/W05 实验与裁决 | ✅ | 夜间版本基础上，随机搜索覆盖了特征动作 |
-| W06 LLM 接入 | ⚠️ 代码完成 | Pydantic AI 提案器和 Critic，带预留与结算；走自建 httpx 客户端（SDK 重试关闭，usage 取自原始 HTTP 响应），已用本地假 OpenAI 服务器测过 tool/native/prompted 三种模式；**还没有对真实提供方请求过** |
+| W06 LLM 接入 | ✅ | 真实模型 `qwen3.7-plus`（tool 模式，`extra_body` 关闭思考，单次输出上限 3000）已接通；A 在 Bank 上跑了两次真实 LLM 研究：探索最优 0.712，确认通过，每次 6.5 万–10 万 Token、约 15 分钟 |
 | W07 主循环 | ✅ | 两个候选、筛查与去重、便宜时都跑、停止规则、工具搜索调度、重规划、方向归因 |
 | W08 冻结与最终评测 | ✅ | `evaluate` 每个 run 只能评一次，第二次报错 |
 | W09 正式对照矩阵 | ⚠️ 准备完成 | 矩阵脚本 `python -m budgetlab.benchmark`（串行、逐个 holdout 评测、可续跑、final 要求代码干净、LLM 开跑前检查）；`configs/benchmark/final.yaml`（LLM）和 `final-scripted.yaml`（备用）为草稿；**正式运行在 20:00** |
@@ -88,30 +88,30 @@ configs/night_smoke.yaml      乳腺癌数据的快速冒烟配置
 
 ## 4. 待办状态（协调人维护）
 
-角色认领情况：C = yirran（兼协调人）；D = chier1（`d-ui` 已提交）；**A、B 尚未确认**。
+角色认领情况：A = Yolo（`a/agent`）；B = Luna805（`b/engine-stability` 已合入）；C = yirran（兼协调人）；D = chier1（`d-ui`）。
 
 | # | 任务 | 角色 | 负责人 | 状态 | 完成标准 |
 |---|---|---|---|---|---|
 | 0 | 启用 CI | 协调人 | yirran | ✅ `560db9b` | Ubuntu 和 Windows 两个任务都是绿的 |
-| 1 | **确认 LLM 来源**：主办方是否提供模型、Key 和额度，还是自费 | 协调人 + A | – | ⏳ 等待原文 | 有群公告或手册原文；定下模型名、Base URL、单价 |
-| 2 | 真实接口门禁：`probe-llm` | A | – | 待认领 | Schema 一次通过，usage 有值 |
-| 3 | 真实 LLM 跑 Bank | A | – | 待认领 | 至少 2 轮真实提案→训练→反馈；Token 账目对得上 |
+| 1 | 确认 LLM 来源 | 协调人 + A | Yolo | ✅ `qwen3.7-plus`（MaaS 网关）；Key 在 A 的机器上，**正式矩阵机器还需要配置 `.env`**；单价待确认 | 定下模型名、Base URL、单价 |
+| 2 | 真实接口门禁：`probe-llm` | A | Yolo | ✅ `474b740`（tool 模式通过） | Schema 一次通过，usage 有值 |
+| 3 | 真实 LLM 跑 Bank | A | Yolo | ✅ 两次干净 run，探索最优 0.712，confirmed_pass | 至少 2 轮真实提案→训练→反馈；Token 账目对得上 |
 | 4 | 对照矩阵脚本 `python -m budgetlab.benchmark` | C | yirran | ✅ `165a031` | 产出符合 INTERFACES 第 5 节格式的 `results/<matrix_id>/` |
 | 5 | **对话式研究页 · 主流程**（16:00）：一句话加数据 → 协议卡片确认 → 开跑，步骤卡片流式显示 → 总结、holdout、快捷问答；含无 LLM 兜底路径 | D（牵头）、A、C | chier1 | 🔄 第一版已合入 `5c304ea` | TEAM.md 4.4 的 16:00 验收（两条路径） |
 | 5b | **对话式研究页 · 完善**（19:30）：开放问答、用一句话修改协议、CSV 上传、对比页签 | D、A、C | chier1 | 待开始 | TEAM.md 4.4 的 19:30 验收 |
 | 6 | README、PPT、项目说明、录屏 | D（全员配合） | chier1 | 待开始 | 数字全部来自 `results/` |
-| 7 | 协议 Agent `DraftProtocol`（16:00 前，主流程必需） | A | – | 待认领 | Bank 上能正确排除 `duration`；记录首次正确率和成本 |
-| 8 | 问答 Agent `budgetlab/qa/agent.py` | A | – | 待认领 | 回答附证据，数字可核对，计量独立 |
+| 7 | 协议 Agent `DraftProtocol` | A | Yolo | ✅ 代码已合入（`budgetlab/agents/protocol_agent.py`），Bank 20/20 首次全对；**接进 D 的对话页还没做** | Bank 上能正确排除 `duration`；记录首次正确率和成本 |
+| 8 | 问答 Agent `budgetlab/qa/agent.py` | A | Yolo | 待开始（D 的 `qa/` 已在 main，可以直接开始） | 回答附证据，数字可核对，计量独立 |
 | 9 | 通用 CSV 适配器 `budgetlab/tasks/csv_task.py` | C | yirran | ✅ `0ce4c7c` | 新的二分类 CSV 能 register → prepare → 跑通 |
 | 10 | 第二个任务（改为 UCI Adult，不做 MLE-bench） | C | yirran | ✅ `c71a56f` | 场景卡 + prepare + 小矩阵能跑通 |
-| 11 | 正式矩阵准备：LLM 开跑前检查、`final.yaml` 和 `final-scripted.yaml` | C | yirran | ✅ `7e1a629`（配置待 A 确认预算） | `--dry-run` 能给出检查结果 |
+| 11 | 正式矩阵准备：LLM 开跑前检查、`final.yaml` 和 `final-scripted.yaml` | C | yirran | ✅ 已按 A 的设置更新（输出上限 3000、关闭思考、每个 run 60 次请求和 30 万 Token） | `--dry-run` 能给出检查结果 |
 | 12 | 成绩表增加"对照随机搜索"和"成本效率"汇总 | C | yirran | ✅（`c/report-tables`，待推送） | 每个系统相对随机搜索的 Δholdout、ΔToken、Δ时间、胜负次数，以及每 1000 Token 带来的提升 |
 | 13 | 演示用 CSV 和协议标准答案 [`examples/student_risk/`](../examples/student_risk/README.md) | C | yirran | ✅（`c/demo-csv`，待推送） | 给 D 现场上传用，给 A 的协议 Agent 打分用 |
 | 14 | 数据与评测限制说明初稿 [`LIMITATIONS.md`](LIMITATIONS.md) | C | yirran | ✅ 初稿（待推送）；第 5 节等正式成绩出来后补 | 交给 D 放进报告和 PPT |
 | 16 | holdout 置信区间与配对 bootstrap | C | yirran | ✅（`c/holdout-ci`，待推送） | `final_evaluation.json` 有 `holdout_ci95`；`comparison.json` 有配对区间 |
 | 15 | **正式矩阵运行**（19:30 冻结、20:00 打 tag 开跑） | C | yirran | 待 20:00 | `results/final-*` 提交，代码版本非 dirty |
-| P1 | `LLMSettings` 支持 `extra_body` | A | – | 待认领 | 选定的模型需要时再做 |
-| P1 | 经验库 `budgetlab/memory/` | B | – | 待认领 | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |
+| P1 | `LLMSettings` 支持 `extra_body` | A | Yolo | ✅ 已合入 | 关闭思考模式 |
+| P1 | 经验库 `budgetlab/memory/` | B | Luna805 | 🔄 进行中（`b/memory`，尚未提交） | 能写能读，并完成一次有经验 vs 无经验的对照；做的话必须在冻结前定好快照 |
 
 对话式研究页的流程和约束见 TEAM.md 第 4 节；时间线和合流点见第 5 节：13:00、16:00 两次合流；19:30 代码冻结；20:00 打 tag 并开跑正式矩阵。
 
