@@ -79,8 +79,11 @@ scripted proposals as **not using an LLM**. Every score
 is read from the run artifacts. Holdout scoring requires a separate button and can run once.
 For a quick demonstration, select an example and click **用所选示例开始**. After a run finishes,
 click **开始另一个任务** to clear the page state without deleting the saved evidence.
-The sidebar can reopen a local run after a browser refresh, including one without a final
-summary. While a new run is active, step cards update automatically every two seconds. The system comparison
+The left research directory can reopen a local run after a browser refresh, including one
+without a final summary. It shows recorded LLM tokens by role and call; unknown usage stays
+separate. The center has the conversation and an experiment branch map based on saved run
+evidence. The right panel shows development scores, research stages, confirmation and holdout
+status. While a new run is active, step cards update every two seconds. The system comparison
 view reads the newest `results/final-*` matrix, or labels `results/dev-*` as development data
 when no formal matrix is available.
 For a repeatable upload demo, attach `examples/student_risk/student_risk.csv` and use the

@@ -37,8 +37,10 @@ from budgetlab.ui.artifacts import (
     resolve_artifact,
     run_dir,
 )
+from budgetlab.ui.insights import cycle_status
 from budgetlab.ui.llm import llm_problem, llm_settings, log_call, research_config
 from budgetlab.ui.presentation import artifact_preview, event_card, load_matrix, trajectory_rows
+from budgetlab.ui.workspace import render_branch_map, render_result_panel, render_token_panel
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
@@ -199,6 +201,39 @@ def show_timeline(cards: list[dict], run_dir: Path, *, key: str) -> None:
             st.caption(f"证据文件：{card['artifact'] or 'events.jsonl'}")
             if show_all:
                 st.json(card["raw"])
+
+
+@st.fragment(run_every="2s")
+def show_side_progress(selected_run_dir: Path | None, history_selected: bool) -> None:
+    """Refresh the run evidence without making the conversation a wall of events."""
+    run_dir = selected_run_dir
+    if not history_selected and (job := st.session_state.get("job")):
+        run_dir = locate_run(job) or run_dir
+    st.markdown("#### 研究进度")
+    if run_dir is None:
+        st.caption("启动研究后显示六阶段进度。")
+        return
+    events = read_events(run_dir)
+    stages = cycle_status(events)
+    completed = sum(count > 0 for _, count in stages)
+    st.progress(completed / len(stages), text=f"已记录 {completed}/{len(stages)} 个阶段")
+    st.caption(" → ".join(label for label, count in stages if count))
+    cards = [card for event in events if (card := event_card(event))]
+    if st.toggle("查看关键步骤", key=f"progress-detail-{run_dir.name}"):
+        show_timeline(cards, run_dir, key=f"side-{run_dir.name}")
+
+
+@st.fragment(run_every="2s")
+def show_saved_run_map(run_dir: Path) -> None:
+    render_branch_map(run_dir)
+
+
+@st.fragment(run_every="2s")
+def show_side_results(selected_run_dir: Path | None, history_selected: bool) -> None:
+    run_dir = selected_run_dir
+    if not history_selected and (job := st.session_state.get("job")):
+        run_dir = locate_run(job) or run_dir
+    render_result_panel(run_dir)
 
 
 def show_evidence_links(run_id: str, evidence: list[dict], answer: str) -> None:
@@ -441,406 +476,11 @@ def show_upload_protocol(upload: dict[str, str], llm_on: bool) -> None:
             st.rerun()
 
 
-VIEWER_TEXT_LIMIT = 50_000
-
-
-def show_score_curve(run_id: str) -> None:
-    """Each experiment's own development score and the best score so far, from summary.json."""
-    import altair as alt
-
-    summary = STORE.get_summary(run_id)
-    rows = curve_rows(summary)
-    metric = summary.get("primary_metric") or "score"
-    st.subheader(f"得分曲线（{metric}）")
-    st.caption(
-        "开发集交叉验证分数，越高越好。圆点是每个实验自己的分数，阶梯线是截至该实验的最优分，"
-        "虚线是基线，菱形是最终交付的实验。数据来自 summary.json 的 trajectory。"
-    )
-    if not rows:
-        st.info("这次研究没有记录得分轨迹。")
-        return
-    frame = pd.DataFrame(rows)
-    x = alt.X("序号:Q", title="实验序号", axis=alt.Axis(tickMinStep=1))
-    y_scale = alt.Scale(zero=False)
-    tooltip = ["实验", "来源", "轮次", "本实验分数", "历史最优", "累计 Token"]
-    layers = [
-        alt.Chart(frame)
-        .mark_line(interpolate="step-after")
-        .encode(x=x, y=alt.Y("历史最优:Q", title=metric, scale=y_scale), tooltip=tooltip),
-        alt.Chart(frame)
-        .mark_circle(size=70)
-        .encode(
-            x=x,
-            y=alt.Y("本实验分数:Q", title=metric, scale=y_scale),
-            color=alt.Color("来源:N", title="来源"),
-            tooltip=tooltip,
-        ),
-    ]
-    if summary.get("baseline_score") is not None:
-        baseline = pd.DataFrame({"基线": [summary["baseline_score"]]})
-        layers.append(alt.Chart(baseline).mark_rule(strokeDash=[4, 4]).encode(y="基线:Q"))
-    delivered = frame[frame["实验"] == summary.get("delivered_experiment_id")]
-    if not delivered.empty:
-        layers.append(
-            alt.Chart(delivered)
-            .mark_point(shape="diamond", size=220, filled=False, strokeWidth=2)
-            .encode(x=x, y="本实验分数:Q", tooltip=tooltip)
-        )
-    st.altair_chart(alt.layer(*layers), width="stretch", alt=f"{run_id} 每个实验的分数与历史最优分")
-    st.dataframe(frame, hide_index=True)
-
-
-def show_artifact_page(run_id: str, relative: str) -> None:
-    """Read-only view of one file of one run, opened from the links under an answer."""
-    st.title("研究证据")
-    base = run_dir(RUNS, run_id)
-    if base is None:
-        st.error("找不到这次研究。")
-        return
-    st.caption(f"研究 {run_id} · 只读")
-    if relative == CURVE:
-        if (base / "summary.json").is_file():
-            show_score_curve(run_id)
-        else:
-            st.info("这次研究还没有 summary.json，暂时画不出得分曲线。")
-        return
-    path = resolve_artifact(RUNS, run_id, relative)
-    if path is None:
-        st.error("只能打开这次研究目录里已存在的文本证据文件（json、md、log、csv 等）。")
-        return
-    st.subheader(relative)
-    st.code(str(path), language=None)
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if not text.strip():
-        st.info("这个文件是空的。")
-        return
-    st.download_button("下载原文件", text, file_name=path.name)
-    suffix = path.suffix.lower()
-    if suffix == ".json":
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            st.code(text[-VIEWER_TEXT_LIMIT:], language=None)
-            return
-        for line in artifact_preview(base, {"artifact": relative}):
-            st.write(line)
-        st.json(payload, expanded=2)
-    elif suffix == ".md":
-        st.markdown(text)
-    elif suffix == ".csv":
-        st.dataframe(pd.read_csv(path, nrows=5000), hide_index=True)
-    else:
-        if len(text) > VIEWER_TEXT_LIMIT:
-            st.caption(f"文件较长，只显示最后 {VIEWER_TEXT_LIMIT:,} 个字符；完整内容请下载。")
-        st.code(text[-VIEWER_TEXT_LIMIT:], language="json" if suffix == ".jsonl" else None)
-
-
-st.set_page_config(page_title="BudgetLab 研究助手", page_icon="🧪", layout="wide")
-try:
-    import_module("pyarrow")
-except ImportError as exc:
-    st.error("页面数据表无法加载：当前 PyArrow 与项目固定的 NumPy 版本不兼容。")
-    st.code(r'.\.venv\Scripts\python.exe -m pip install "pyarrow==25.0.1"')
-    st.caption(f"技术信息：{exc}")
-    st.stop()
-if "file" in st.query_params:
-    # Evidence links under answers open here, in a new tab, without touching the research page.
-    show_artifact_page(st.query_params.get("run", ""), st.query_params.get("file", ""))
-    st.stop()
-LLM_PROBLEM = llm_problem(ROOT)
-st.title("BudgetLab 研究助手")
-st.caption("确认任务协议 · 查看实验轨迹 · 核对结论证据")
-
-view = st.segmented_control("页面", ["研究过程", "系统对比"], default="研究过程")
-if view == "系统对比":
-    matrix_data = load_matrix(ROOT / "results")
-    if matrix_data:
-        matrix, rows, formal = matrix_data
-        st.subheader("正式成绩" if formal else "开发数据")
-        if not formal:
-            st.warning("这是一轮脚本化提案的开发数据，仅用于搭建和检查页面，不是正式成绩。")
-        st.caption(f"来源：{matrix.parent.relative_to(ROOT)}")
-        valid = [row for row in rows if row.get("status") == "ok"]
-        with st.container(horizontal=True):
-            st.metric("系统", len({row.get("system") for row in valid}), border=True)
-            st.metric("完成的运行", len(valid), border=True)
-            st.metric("任务", len({row.get("task_id") for row in valid}), border=True)
-        columns = [
-            "system",
-            "proposal_source",
-            "baseline_score",
-            "delivered_dev_score",
-            "holdout_score",
-            "llm_tokens",
-            "wall_seconds",
-            "experiments",
-            "run_id",
-        ]
-        st.dataframe(
-            [{key: row.get(key) for key in columns} for row in rows],
-            hide_index=True,
-            alt="各研究系统的开发集、holdout 分数和运行成本对比",
-        )
-        run_options = [row["run_id"] for row in valid if row.get("run_id")]
-        if run_options:
-            chosen = st.selectbox("查看单次运行轨迹", run_options)
-            summary_path = matrix.parent / "runs" / chosen / "summary.json"
-            if summary_path.is_file():
-                trajectory = trajectory_rows(json.loads(summary_path.read_text(encoding="utf-8")))
-                if trajectory:
-                    if any(row["累计 Token"] for row in trajectory):
-                        st.line_chart(
-                            trajectory,
-                            x="累计 Token",
-                            y="最优分",
-                            alt="最优分随累计 Token 的变化",
-                        )
-                    else:
-                        st.caption("这次运行没有消耗 LLM Token，改按实验顺序展示最优分。")
-                        st.line_chart(
-                            trajectory,
-                            x="实验",
-                            y="最优分",
-                            alt="零 Token 运行中最优分随实验顺序的变化",
-                        )
-                    st.line_chart(
-                        trajectory,
-                        x="累计秒数",
-                        y="最优分",
-                        alt="最优分随累计运行时间的变化",
-                    )
-    else:
-        st.info("当前分支尚未包含 results/dev-* 或 results/final-* 对照数据。")
-    st.stop()
-
-with st.sidebar:
-    task_name = st.selectbox(
-        "示例任务",
-        list(TASKS),
-        disabled=bool(st.session_state.get("job")),
-        on_change=reset_task_draft,
-    )
-    task_id, config_path = TASKS[task_name]
-    if st.session_state.get("custom_task"):
-        custom_id, custom_config = st.session_state["custom_task"]
-        task_id, config_path = custom_id, Path(custom_config)
-        st.caption("当前任务：你上传的 CSV")
-    use_llm = st.toggle(
-        "使用 LLM",
-        value=LLM_PROBLEM is None,
-        key="use_llm",
-        disabled=LLM_PROBLEM is not None or bool(st.session_state.get("job")),
-    )
-    llm_on = use_llm and LLM_PROBLEM is None
-    proposer = "llm" if llm_on else "scripted"
-    if LLM_PROBLEM is not None:
-        st.caption(f"{LLM_PROBLEM}：使用脚本化提案和快捷问题，不使用 LLM。")
-    elif llm_on:
-        st.caption("LLM 负责起草 CSV 协议、提出实验和回答开放问题；指标和裁决仍由程序计算。")
-    else:
-        st.caption("已关闭 LLM：使用脚本化提案和快捷问题。")
-    history = STORE.list_runs()
-    history_id = st.selectbox("查看已有研究", ["开始新研究", *[row["run_id"] for row in history]])
-    st.write("当前进度")
-    active = st.session_state.get("job")
-    if active:
-        st.write(f"运行中：{active.get('run_id') or '启动中'}")
-        active_run_id = active.get("run_id")
-        if active_run_id and (RUNS / active_run_id / "summary.json").is_file():
-            st.success("研究已完成")
-            if st.button("开始另一个任务"):
-                for key in ("job", "request", "protocol_confirmed", "qa_pending"):
-                    st.session_state.pop(key, None)
-                st.rerun()
-    else:
-        st.write("等待任务")
-    if active and active.get("run_id"):
-        summary_path = RUNS / active["run_id"] / "summary.json"
-        if summary_path.is_file():
-            trajectory = STORE.get_summary(active["run_id"]).get("trajectory", [])
-            if trajectory:
-                st.line_chart(
-                    {"最优分": [point.get("best_score_after") for point in trajectory]},
-                    x_label="实验序号",
-                    alt="当前运行的最优分变化",
-                )
-
-if history_id != "开始新研究":
-    history_dir = RUNS / history_id
-    st.subheader("已有研究")
-    st.caption(f"{history_id} · 数据来自本机 runs/，不属于正式成绩")
-    if (history_dir / "summary.json").is_file():
-        history_summary = STORE.get_summary(history_id)
-        with st.container(horizontal=True):
-            baseline = history_summary.get("baseline_score")
-            delivered = history_summary.get("delivered_dev_score")
-            st.metric("基线", f"{baseline:.3f}" if baseline is not None else "—", border=True)
-            st.metric("交付模型", f"{delivered:.3f}" if delivered is not None else "—", border=True)
-            st.metric("确认状态", history_summary.get("confirmation_status", "未知"), border=True)
-        evaluation = STORE.get_final_evaluation(history_id)
-        if evaluation:
-            st.write(holdout_text(evaluation))
-        elif st.button("运行一次 holdout 评测", key=f"history-evaluate-{history_id}"):
-            if error := evaluate_run(history_id):
-                st.error(error)
-            else:
-                st.rerun()
-        show_quick_questions(history_id, key=f"history-faq-{history_id}")
-    else:
-        st.info("这次研究还没有最终汇总，可能正在运行，也可能已中断。步骤仍可查看。")
-    cards = [card for item in read_events(history_dir) if (card := event_card(item))]
-    st.write("**研究步骤**")
-    show_timeline(cards, history_dir, key=f"history-{history_id}")
-    st.stop()
-
-if "request" not in st.session_state:
-    with st.container(border=True):
-        st.subheader("快速演示")
-        st.write("选择示例任务，或在下方对话框附上二分类 CSV。确认协议后再启动研究。")
-        if st.button("用所选示例开始", type="primary"):
-            st.session_state["request"] = protocol_card(task_id)["business_question"]
-            st.rerun()
-
-
 def finished_run_id() -> str | None:
     job = st.session_state.get("job")
     if job and job.get("run_id") and (RUNS / job["run_id"] / "summary.json").is_file():
         return job["run_id"]
     return None
-
-
-finished = finished_run_id()
-prompt = st.chat_input(
-    "就这次研究追问，例如：为什么最后选了这个模型？" if finished else "描述任务，可附上二分类 CSV",
-    accept_file=True,
-    file_type="csv",
-)
-if prompt:
-    if finished and not prompt.files and prompt.text.strip():
-        st.session_state["qa_pending"] = (finished, prompt.text.strip())
-    elif prompt.files:
-        uploaded = prompt.files[0]
-        raw = uploaded.getvalue()
-        digest = hashlib.sha256(raw).hexdigest()[:16]
-        path = ROOT / "ui_state" / "uploads" / f"{digest}.csv"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(raw)
-        st.session_state["upload"] = {
-            "path": str(path),
-            "digest": digest,
-            "filename": uploaded.name,
-            "request": prompt.text.strip() or f"预测 {uploaded.name} 中的二分类目标",
-        }
-        st.session_state["request"] = st.session_state["upload"]["request"]
-        st.session_state.pop("custom_task", None)
-        st.session_state.pop("protocol_confirmed", None)
-        for key in (
-            "upload-target",
-            "upload-positive",
-            "upload-time",
-            "upload-metric",
-            "upload-demo-card",
-        ):
-            st.session_state.pop(key, None)
-    elif prompt.text.strip():
-        st.session_state["request"] = prompt.text.strip()
-if "request" not in st.session_state:
-    st.info("输入一句任务描述，可附上二分类 CSV；也可以先选择示例任务。")
-    st.stop()
-
-with st.chat_message("user"):
-    st.write(st.session_state["request"])
-
-if st.session_state.get("upload"):
-    show_upload_protocol(st.session_state["upload"], llm_on)
-    st.stop()
-
-card = protocol_card(task_id)
-config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-with st.chat_message("assistant"):
-    if task_id.startswith("upload-"):
-        st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
-    else:
-        st.write("请确认研究方案。以下是该示例的任务说明。")
-    st.write(f"**任务：** {card['title']}")
-    st.write(f"**预测时点：** {card['prediction_time']}")
-    st.write(f"**目标列：** {card['target']['column']}（正类：{card['target']['positive_label']}）")
-    st.write(f"**指标：** {config.get('primary_metric', 'f1_macro')}")
-    fields = card["fields"]
-    usable = {
-        "available": "✅ 可以用",
-        "post_outcome": "❌ 不能用：结果出来后才知道",
-        "identifier": "➖ 不用：只是编号",
-    }
-    count = f"（共 {len(fields)} 列）" if fields else ""
-    with st.expander(f"哪些数据列可以用来预测{count}"):
-        if fields:
-            # Columns that cannot be used come first so they are easy to check.
-            ordered = sorted(fields, key=lambda field: field["availability"] == "available")
-            st.dataframe(
-                [
-                    {
-                        "数据列": field["name"],
-                        "能否用来预测": usable.get(field["availability"], field["availability"]),
-                        "说明": field.get("note", field.get("description", "")),
-                    }
-                    for field in ordered
-                ],
-                hide_index=True,
-                alt="示例任务的每个数据列能否用来预测，以及说明",
-            )
-        elif card.get("default_availability") == "available":
-            st.write("这个示例的所有数据列都可以用来预测。")
-        else:
-            st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
-    confirmed = st.checkbox(
-        "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
-    )
-
-with st.chat_message("assistant"):
-    run_config = research_config(config, proposer, ROOT)
-    budget = run_config["budget"]
-    if proposer == "llm":
-        source = (
-            f"提案来源 `llm`（{run_config['llm'].get('model') or os.environ.get('LLM_MODEL')}，"
-            f"最多 {budget['max_llm_requests']} 次请求、{budget['max_llm_tokens']:,} Token）"
-        )
-    else:
-        source = "提案来源 `scripted`（0 Token）"
-    st.write(
-        f"**研究预算：** 最多 {budget['max_experiments']} 次实验；系统 `budgetlab`，{source}。"
-    )
-    ready = (DATA / "prepared" / task_id / "development.csv").is_file()
-    if not ready:
-        st.warning(
-            "当前任务数据尚未准备。Bank 和 Adult 首次准备需下载数据；Breast Cancer 可离线准备。"
-        )
-        if st.button("准备示例数据", disabled=not confirmed):
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "budgetlab.cli",
-                    "prepare",
-                    "--task",
-                    task_id,
-                    "--data-root",
-                    str(DATA),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode:
-                st.error(result.stderr[-1000:])
-            else:
-                st.rerun()
-    if st.button(
-        "开始研究", disabled=not confirmed or not ready or bool(st.session_state.get("job"))
-    ):
-        st.session_state["job"] = launch(task_id, config_path, proposer)
-        st.rerun()
 
 
 @st.fragment(run_every="2s")
@@ -857,23 +497,21 @@ def show_active_run() -> None:
         return
 
     events = read_events(run_dir)
-    with st.chat_message("assistant"):
-        st.write(f"**研究过程：** `{run_dir.name}`")
-        cards = [card for event in events if (card := event_card(event))]
-        show_timeline(cards, run_dir, key=f"active-{run_dir.name}")
-        if not (run_dir / "summary.json").is_file():
-            if job["process"].poll() is None:
-                st.info("研究仍在进行；步骤卡每 2 秒自动更新。")
-            else:
-                st.error("研究进程已退出，但没有生成 summary.json；请查看运行日志。")
-            log_path = ROOT / "ui_state" / "research.log"
-            if log_path.is_file():
-                with st.expander("运行日志末尾"):
-                    st.code(log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
-            return
+    st.caption(f"研究编号：{run_dir.name} · 已记录 {len(events)} 条事件")
+    render_branch_map(run_dir)
+    if not (run_dir / "summary.json").is_file():
+        if job["process"].poll() is None:
+            st.info("研究仍在进行；分岔图与侧栏进度每 2 秒自动更新。")
+        else:
+            st.error("研究进程已退出，但没有生成 summary.json；请查看运行日志。")
+        log_path = ROOT / "ui_state" / "research.log"
+        if log_path.is_file():
+            with st.expander("运行日志末尾"):
+                st.code(log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
+        return
 
     if not job.get("finished_seen"):
-        # One full rerun so the sidebar and the chat box switch to the finished state.
+        # One full rerun so the side panels and the chat box switch to the finished state.
         job["finished_seen"] = True
         st.rerun()
     summary = STORE.get_summary(run_dir.name)
@@ -969,6 +607,509 @@ def show_open_qa(run_id: str) -> None:
             show_evidence_links(run_id, turn.get("evidence", []), turn["answer"])
 
 
-show_active_run()
-if finished_run_id():
-    show_open_qa(finished_run_id())
+VIEWER_TEXT_LIMIT = 50_000
+
+
+def show_score_curve(run_id: str) -> None:
+    """Each experiment's own development score and the best score so far, from summary.json."""
+    import altair as alt
+
+    summary = STORE.get_summary(run_id)
+    rows = curve_rows(summary)
+    metric = summary.get("primary_metric") or "score"
+    st.subheader(f"得分曲线（{metric}）")
+    st.caption(
+        "开发集交叉验证分数，越高越好。圆点是每个实验自己的分数，阶梯线是截至该实验的最优分，"
+        "虚线是基线，菱形是最终交付的实验。数据来自 summary.json 的 trajectory。"
+    )
+    if not rows:
+        st.info("这次研究没有记录得分轨迹。")
+        return
+    frame = pd.DataFrame(rows)
+    x = alt.X("序号:Q", title="实验序号", axis=alt.Axis(tickMinStep=1))
+    y_scale = alt.Scale(zero=False)
+    tooltip = ["实验", "来源", "轮次", "本实验分数", "历史最优", "累计 Token"]
+    layers = [
+        alt.Chart(frame)
+        .mark_line(interpolate="step-after")
+        .encode(x=x, y=alt.Y("历史最优:Q", title=metric, scale=y_scale), tooltip=tooltip),
+        alt.Chart(frame)
+        .mark_circle(size=70)
+        .encode(
+            x=x,
+            y=alt.Y("本实验分数:Q", title=metric, scale=y_scale),
+            color=alt.Color("来源:N", title="来源"),
+            tooltip=tooltip,
+        ),
+    ]
+    if summary.get("baseline_score") is not None:
+        baseline = pd.DataFrame({"基线": [summary["baseline_score"]]})
+        layers.append(alt.Chart(baseline).mark_rule(strokeDash=[4, 4]).encode(y="基线:Q"))
+    delivered = frame[frame["实验"] == summary.get("delivered_experiment_id")]
+    if not delivered.empty:
+        layers.append(
+            alt.Chart(delivered)
+            .mark_point(shape="diamond", size=220, filled=False, strokeWidth=2)
+            .encode(x=x, y="本实验分数:Q", tooltip=tooltip)
+        )
+    st.altair_chart(alt.layer(*layers), width="stretch", alt=f"{run_id} 每个实验的分数与历史最优分")
+    st.dataframe(frame, hide_index=True)
+
+
+def show_artifact_page(run_id: str, relative: str) -> None:
+    """Read-only view of one file of one run, opened from the links under an answer."""
+    st.title("研究证据")
+    base = run_dir(RUNS, run_id)
+    if base is None:
+        st.error("找不到这次研究。")
+        return
+    st.caption(f"研究 {run_id} · 只读")
+    if relative == CURVE:
+        if (base / "summary.json").is_file():
+            show_score_curve(run_id)
+        else:
+            st.info("这次研究还没有 summary.json，暂时画不出得分曲线。")
+        return
+    path = resolve_artifact(RUNS, run_id, relative)
+    if path is None:
+        st.error("只能打开这次研究目录里已存在的文本证据文件（json、md、log、csv 等）。")
+        return
+    st.subheader(relative)
+    st.code(str(path), language=None)
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if not text.strip():
+        st.info("这个文件是空的。")
+        return
+    st.download_button("下载原文件", text, file_name=path.name)
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            st.code(text[-VIEWER_TEXT_LIMIT:], language=None)
+            return
+        for line in artifact_preview(base, {"artifact": relative}):
+            st.write(line)
+        st.json(payload, expanded=2)
+    elif suffix == ".md":
+        st.markdown(text)
+    elif suffix == ".csv":
+        st.dataframe(pd.read_csv(path, nrows=5000), hide_index=True)
+    else:
+        if len(text) > VIEWER_TEXT_LIMIT:
+            st.caption(f"文件较长，只显示最后 {VIEWER_TEXT_LIMIT:,} 个字符；完整内容请下载。")
+        st.code(text[-VIEWER_TEXT_LIMIT:], language="json" if suffix == ".jsonl" else None)
+
+
+st.set_page_config(
+    page_title="BudgetLab 研究助手",
+    page_icon=":material/science:",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+try:
+    import_module("pyarrow")
+except ImportError as exc:
+    st.error("页面数据表无法加载：当前 PyArrow 与项目固定的 NumPy 版本不兼容。")
+    st.code(r'.\.venv\Scripts\python.exe -m pip install "pyarrow==25.0.1"')
+    st.caption(f"技术信息：{exc}")
+    st.stop()
+if "file" in st.query_params:
+    # Evidence links under answers open here, in a new tab, without touching the research page.
+    show_artifact_page(st.query_params.get("run", ""), st.query_params.get("file", ""))
+    st.stop()
+LLM_PROBLEM = llm_problem(ROOT)
+st.html("""<style>
+body::before {
+  content:"";position:fixed;inset:-30%;pointer-events:none;z-index:0;
+  background:radial-gradient(ellipse at 24% 35%,#b8ff6524,transparent 42%),
+             radial-gradient(ellipse at 76% 65%,#b8ff6515,transparent 42%);
+  animation:aurora 26s ease-in-out infinite alternate;
+}
+@keyframes aurora {from {transform:translate(-4%,2%) rotate(-6deg)}
+  to {transform:translate(5%,-3%) rotate(7deg)}}
+@media (prefers-reduced-motion:reduce) {body::before {animation:none}}
+.st-key-brand_header {
+  background:linear-gradient(110deg,#192436,#101823 68%);
+  border:1px solid #304052;border-radius:18px;
+  padding:.75rem 1.4rem;margin-bottom:.7rem;
+  position:sticky;top:.25rem;z-index:20;
+  box-shadow:0 12px 36px #0005;
+}
+.st-key-brand_header h3 {letter-spacing:-.04em;font-weight:800;margin:0;}
+.st-key-left_rail,.st-key-center_rail,.st-key-right_rail {
+  height:calc(100vh - 10.5rem);overflow-y:auto;
+  padding:1.3rem;border:1px solid #263446;
+  border-radius:16px;
+  scrollbar-color:#40556a transparent;
+}
+.st-key-left_rail,.st-key-right_rail {background:#111925;}
+.st-key-center_rail {background:#151f2c;}
+.st-key-left_rail h4,.st-key-right_rail h4 {color:#b8ff65;letter-spacing:.04em;}
+.st-key-token_meter {
+  background:linear-gradient(135deg,#243a30,#17271f);
+  padding:1rem 1.1rem;border:1px solid #4a7250;
+  border-radius:14px;margin-top:1rem;
+}
+.st-key-token_meter h2 {color:#b8ff65;letter-spacing:-.06em;}
+.st-key-research_prompt {
+  position:fixed;bottom:.7rem;left:25%;width:44%;z-index:30;
+  background:#192536;border:1px solid #3b5267;
+  border-radius:16px;padding:.45rem .7rem;
+  box-shadow:0 18px 44px #0009;
+}
+@media (max-width:900px) {
+  .st-key-left_rail,.st-key-center_rail,.st-key-right_rail {
+    height:auto;max-height:none;overflow:visible;
+  }
+  .st-key-research_prompt {left:1rem;width:calc(100% - 2rem);}
+}
+</style>""")
+with st.container(key="brand_header"):
+    brand, status = st.columns([2, 1], vertical_alignment="center")
+    with brand:
+        st.markdown("### BudgetLab")
+    with status:
+        st.caption("● RESEARCH")
+    view = st.segmented_control(
+        "工作区", ["研究对话", "系统对比"], default="研究对话", label_visibility="collapsed"
+    )
+
+left_col, center_col, right_col = st.columns([1.05, 2.15, 1.28], gap=None)
+with left_col:
+    with st.container(key="left_rail"):
+        st.markdown("#### 研究目录")
+        task_name = st.selectbox(
+            "示例任务",
+            list(TASKS),
+            disabled=bool(st.session_state.get("job")),
+            on_change=reset_task_draft,
+        )
+        task_id, config_path = TASKS[task_name]
+        if st.session_state.get("custom_task"):
+            custom_id, custom_config = st.session_state["custom_task"]
+            task_id, config_path = custom_id, Path(custom_config)
+            st.caption("当前任务：你上传的 CSV")
+        use_llm = st.toggle(
+            "使用 LLM",
+            value=LLM_PROBLEM is None,
+            key="use_llm",
+            disabled=LLM_PROBLEM is not None or bool(st.session_state.get("job")),
+        )
+        llm_on = use_llm and LLM_PROBLEM is None
+        proposer = "llm" if llm_on else "scripted"
+        if LLM_PROBLEM is not None:
+            st.caption(f"{LLM_PROBLEM}：使用脚本化提案和快捷问题，不使用 LLM。")
+        elif llm_on:
+            st.caption("LLM 负责起草 CSV 协议、提出实验和回答开放问题；指标和裁决仍由程序计算。")
+        else:
+            st.caption("已关闭 LLM：使用脚本化提案和快捷问题。")
+        history = STORE.list_runs()
+        run_labels = {
+            row["run_id"]: (
+                f"{row.get('task_id') or '未知任务'} · "
+                f"{row.get('system') or '未知系统'} · "
+                f"{'已完成' if row['finished'] else '进行中'} · "
+                f"{row['run_id'][:15]}"
+            )
+            for row in history
+        }
+        history_id = st.selectbox(
+            f"研究记录（{len(history)}）",
+            ["开始新研究", *run_labels],
+            format_func=lambda run_id: run_labels.get(run_id, run_id),
+        )
+        active = st.session_state.get("job")
+        if active:
+            st.caption(f"运行中 · {active.get('run_id') or '启动中'}")
+            active_run_id = active.get("run_id")
+            if active_run_id and (RUNS / active_run_id / "summary.json").is_file():
+                st.success("研究已完成")
+                if st.button("开始另一个任务"):
+                    for key in ("job", "request", "protocol_confirmed", "qa_pending"):
+                        st.session_state.pop(key, None)
+                    st.rerun()
+        selected_run_id = (
+            history_id if history_id != "开始新研究" else active.get("run_id") if active else None
+        )
+        selected_run_dir = RUNS / selected_run_id if selected_run_id else None
+        render_token_panel(selected_run_dir)
+        show_side_progress(selected_run_dir, history_id != "开始新研究")
+
+with right_col:
+    with st.container(key="right_rail"):
+        st.markdown("#### 证据文件")
+        if selected_run_dir and selected_run_dir.is_dir():
+            for name in (
+                "contract.json",
+                "events.jsonl",
+                "budget.json",
+                "summary.json",
+                "final_evaluation.json",
+                "report.md",
+            ):
+                file_path = selected_run_dir / name
+                if file_path.is_file():
+                    with st.expander(f"↗ {name}"):
+                        st.code(str(file_path.relative_to(ROOT)))
+        else:
+            st.write("开始研究后在这里查看证据。")
+        show_side_results(selected_run_dir, history_id != "开始新研究")
+
+with center_col:
+    with st.container(key="center_rail"):
+        if view == "系统对比":
+            matrix_data = load_matrix(ROOT / "results")
+            if matrix_data:
+                matrix, rows, formal = matrix_data
+                st.subheader("正式成绩" if formal else "开发数据")
+                if not formal:
+                    st.warning("这是一轮脚本化提案的开发数据，仅用于搭建和检查页面，不是正式成绩。")
+                st.caption(f"来源：{matrix.parent.relative_to(ROOT)}")
+                valid = [row for row in rows if row.get("status") == "ok"]
+                with st.container(horizontal=True):
+                    st.metric("系统", len({row.get("system") for row in valid}), border=True)
+                    st.metric("完成的运行", len(valid), border=True)
+                    st.metric("任务", len({row.get("task_id") for row in valid}), border=True)
+                columns = [
+                    "system",
+                    "proposal_source",
+                    "baseline_score",
+                    "delivered_dev_score",
+                    "holdout_score",
+                    "llm_tokens",
+                    "wall_seconds",
+                    "experiments",
+                    "run_id",
+                ]
+                st.dataframe(
+                    [{key: row.get(key) for key in columns} for row in rows],
+                    hide_index=True,
+                    alt="各研究系统的开发集、holdout 分数和运行成本对比",
+                )
+                run_options = [row["run_id"] for row in valid if row.get("run_id")]
+                if run_options:
+                    chosen = st.selectbox("查看单次运行轨迹", run_options)
+                    summary_path = matrix.parent / "runs" / chosen / "summary.json"
+                    if summary_path.is_file():
+                        trajectory = trajectory_rows(
+                            json.loads(summary_path.read_text(encoding="utf-8"))
+                        )
+                        if trajectory:
+                            if any(row["累计 Token"] for row in trajectory):
+                                st.line_chart(
+                                    trajectory,
+                                    x="累计 Token",
+                                    y="最优分",
+                                    alt="最优分随累计 Token 的变化",
+                                )
+                            else:
+                                st.caption("这次运行没有消耗 LLM Token，改按实验顺序展示最优分。")
+                                st.line_chart(
+                                    trajectory,
+                                    x="实验",
+                                    y="最优分",
+                                    alt="零 Token 运行中最优分随实验顺序的变化",
+                                )
+                            st.line_chart(
+                                trajectory,
+                                x="累计秒数",
+                                y="最优分",
+                                alt="最优分随累计运行时间的变化",
+                            )
+            else:
+                st.info("当前分支尚未包含 results/dev-* 或 results/final-* 对照数据。")
+            st.stop()
+        if history_id != "开始新研究":
+            history_dir = RUNS / history_id
+            st.subheader("已有研究")
+            st.caption(f"{history_id} · 数据来自本机 runs/，不属于正式成绩")
+            show_saved_run_map(history_dir)
+            if (history_dir / "summary.json").is_file():
+                history_summary = STORE.get_summary(history_id)
+                st.markdown("### 研究结论")
+                with st.container(horizontal=True):
+                    baseline = history_summary.get("baseline_score")
+                    delivered = history_summary.get("delivered_dev_score")
+                    st.metric(
+                        "基线", f"{baseline:.3f}" if baseline is not None else "—", border=True
+                    )
+                    st.metric(
+                        "交付模型",
+                        f"{delivered:.3f}" if delivered is not None else "—",
+                        border=True,
+                    )
+                    st.metric(
+                        "确认状态", history_summary.get("confirmation_status", "未知"), border=True
+                    )
+                evaluation = STORE.get_final_evaluation(history_id)
+                if evaluation:
+                    st.write(holdout_text(evaluation))
+                elif st.button("运行一次 holdout 评测", key=f"history-evaluate-{history_id}"):
+                    if error := evaluate_run(history_id):
+                        st.error(error)
+                    else:
+                        st.rerun()
+                show_quick_questions(history_id, key=f"history-faq-{history_id}")
+            else:
+                st.info("这次研究还没有最终汇总，可能正在运行，也可能已中断。步骤仍可查看。")
+            with st.container(key="research_prompt"):
+                st.chat_input("当前记录请使用上方快捷问题", disabled=True)
+            st.stop()
+
+        if "request" not in st.session_state:
+            with st.container(border=True):
+                st.subheader("快速演示")
+                st.write("选择示例任务，或在下方对话框附上二分类 CSV。确认协议后再启动研究。")
+                if st.button("用所选示例开始", type="primary"):
+                    st.session_state["request"] = protocol_card(task_id)["business_question"]
+                    st.rerun()
+
+        finished = finished_run_id()
+        with st.container(key="research_prompt"):
+            prompt = st.chat_input(
+                "就这次研究追问，例如：为什么最后选了这个模型？"
+                if finished
+                else "描述任务，可附上二分类 CSV",
+                accept_file=True,
+                file_type="csv",
+            )
+        if prompt:
+            if finished and not prompt.files and prompt.text.strip():
+                st.session_state["qa_pending"] = (finished, prompt.text.strip())
+            elif prompt.files:
+                uploaded = prompt.files[0]
+                raw = uploaded.getvalue()
+                digest = hashlib.sha256(raw).hexdigest()[:16]
+                path = ROOT / "ui_state" / "uploads" / f"{digest}.csv"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(raw)
+                st.session_state["upload"] = {
+                    "path": str(path),
+                    "digest": digest,
+                    "filename": uploaded.name,
+                    "request": prompt.text.strip() or f"预测 {uploaded.name} 中的二分类目标",
+                }
+                st.session_state["request"] = st.session_state["upload"]["request"]
+                st.session_state.pop("custom_task", None)
+                st.session_state.pop("protocol_confirmed", None)
+                for key in (
+                    "upload-target",
+                    "upload-positive",
+                    "upload-time",
+                    "upload-metric",
+                    "upload-demo-card",
+                ):
+                    st.session_state.pop(key, None)
+            elif prompt.text.strip():
+                st.session_state["request"] = prompt.text.strip()
+        if "request" not in st.session_state:
+            st.info("输入一句任务描述，可附上二分类 CSV；也可以先选择示例任务。")
+            st.stop()
+
+        with st.chat_message("user"):
+            st.write(st.session_state["request"])
+
+        if st.session_state.get("upload"):
+            show_upload_protocol(st.session_state["upload"], llm_on)
+            st.stop()
+
+        card = protocol_card(task_id)
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        with st.chat_message("assistant"):
+            if task_id.startswith("upload-"):
+                st.write("这是你刚才逐列确认的 CSV 协议；请在开跑前再次核对。")
+            else:
+                st.write("请确认研究方案。以下是该示例的任务说明。")
+            st.write(f"**任务：** {card['title']}")
+            st.write(f"**预测时点：** {card['prediction_time']}")
+            st.write(
+                f"**目标列：** {card['target']['column']}"
+                f"（正类：{card['target']['positive_label']}）"
+            )
+            st.write(f"**指标：** {config.get('primary_metric', 'f1_macro')}")
+            fields = card["fields"]
+            usable = {
+                "available": "✅ 可以用",
+                "post_outcome": "❌ 不能用：结果出来后才知道",
+                "identifier": "➖ 不用：只是编号",
+            }
+            count = f"（共 {len(fields)} 列）" if fields else ""
+            with st.expander(f"哪些数据列可以用来预测{count}"):
+                if fields:
+                    # Columns that cannot be used come first so they are easy to check.
+                    ordered = sorted(fields, key=lambda field: field["availability"] == "available")
+                    st.dataframe(
+                        [
+                            {
+                                "数据列": field["name"],
+                                "能否用来预测": usable.get(
+                                    field["availability"], field["availability"]
+                                ),
+                                "说明": field.get("note", field.get("description", "")),
+                            }
+                            for field in ordered
+                        ],
+                        hide_index=True,
+                        alt="示例任务的每个数据列能否用来预测，以及说明",
+                    )
+                elif card.get("default_availability") == "available":
+                    st.write("这个示例的所有数据列都可以用来预测。")
+                else:
+                    st.write("这个示例的数据列按任务说明里的默认规则判断能否使用。")
+            confirmed = st.checkbox(
+                "我确认目标列、预测时点，以及哪些数据列可以用来预测", key="protocol_confirmed"
+            )
+
+        with st.chat_message("assistant"):
+            run_config = research_config(config, proposer, ROOT)
+            budget = run_config["budget"]
+            if proposer == "llm":
+                source = (
+                    "提案来源 `llm`（"
+                    f"{run_config['llm'].get('model') or os.environ.get('LLM_MODEL')}，"
+                    f"最多 {budget['max_llm_requests']} 次请求、"
+                    f"{budget['max_llm_tokens']:,} Token）"
+                )
+            else:
+                source = "提案来源 `scripted`（0 Token）"
+            st.write(
+                f"**研究预算：** 最多 {budget['max_experiments']} 次实验；"
+                f"系统 `budgetlab`，{source}。"
+            )
+            ready = (DATA / "prepared" / task_id / "development.csv").is_file()
+            if not ready:
+                st.warning(
+                    "当前任务数据尚未准备。Bank 和 Adult 首次准备需下载数据；"
+                    "Breast Cancer 可离线准备。"
+                )
+                if st.button("准备示例数据", disabled=not confirmed):
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "budgetlab.cli",
+                            "prepare",
+                            "--task",
+                            task_id,
+                            "--data-root",
+                            str(DATA),
+                        ],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if result.returncode:
+                        st.error(result.stderr[-1000:])
+                    else:
+                        st.rerun()
+            if st.button(
+                "开始研究", disabled=not confirmed or not ready or bool(st.session_state.get("job"))
+            ):
+                st.session_state["job"] = launch(task_id, config_path, proposer)
+                st.rerun()
+
+        show_active_run()
+        if finished_run_id():
+            show_open_qa(finished_run_id())

@@ -1,5 +1,30 @@
 # 开发日志 · D · 展示与材料
 
+### 2026-11-14 约 18:30 · yirran（协调人）+ Claude Code · 把 `d-ui`（3e2bae8）合进 `main`
+- 做了：三栏布局、深色主题、研究路径分岔图、左侧 Token 面板和六阶段进度、右侧验证结果全部采用 D 的版本；`d-ui` 分支没有的 main 改动按 main 保留：LLM 开关（移到左侧研究目录）、协议 Agent 起草、开放问答、页面措辞（研究方案、数据列能否用来预测、快捷问题胶囊）、holdout 95% 区间，以及回答下的“相关文件”链接和只读查看页。Token 面板的说明改成：只统计本次研究的提案和审查，CSV 协议起草和开放问答另记在 `ui_state/`。
+- 验证：全量 pytest、ruff；本地浏览器看了首页、已完成 run 的追问和链接、历史 run、系统对比。
+
+### 2026-11-14 · D + Codex · 精简研究工作区视觉
+
+- 做了：保持三栏、进度、分岔、验证及对话功能不变；改为深色工作台与荧光绿/蓝色实验状态，去掉重复的页头说明、运行编号提示和常驻的零 Token 清单，过程明细改为展开查看。
+- 验证：`ruff check .`、`ruff format --check budgetlab tests`、UI 聚焦测试及 Streamlit AppTest（首页、历史 run、系统对比）。
+- 问题：无头浏览器在当前 Windows 环境因 GPU 进程失败，仍需人工看实际视觉效果。
+- 下一步：按浏览器实际截图微调间距和窄屏布局；对接 A 的协议和问答接口。
+
+### 2026-11-14 · D + Codex · 固定三区与可读的实时研究地图
+
+- 做了：按参考图将顶部与两侧栏固定在视口内，中间研究内容单独滚动，底部任务输入固定；把事件步骤移到左侧六阶段进度，默认收起明细；中间保留协议、实验分岔、结论和快捷追问。地图对进行中与历史未完成 run 每 2 秒刷新，节点悬停显示实验来源、依据、分数和裁决，可按编号查看原始假设。
+- 验证：Streamlit AppTest 检查首页、历史 run、侧栏详情和系统对比均无异常；`python -m pytest -q tests/test_ui_insights.py tests/test_ui_presentation.py`（7 passed）。
+- 问题：固定布局和窄屏样式还需浏览器视觉验收；历史记录的自由输入仍未接 A 的开放问答 Agent。
+- 下一步：视觉验收后同步 `main` 中 A 的接口，再接自由协议和开放问答。
+
+### 2026-11-14 · D + Codex · 三栏研究工作区
+
+- 做了：按参考图调整为黑白灰三栏布局和橙色重点；左侧按任务、系统和状态索引研究记录并显示各过程 Token，中央保留对话并新增真实实验分岔图，右侧显示开发集实验分数、六阶段闭环与验证状态。所有数字读取 `runs/` 证据，脚本化提案明确标成 0 Token；未做的 holdout 显示“尚未评测”。
+- 验证：`python -m pytest -q`（64 passed）、`ruff check .`、`ruff format --check budgetlab tests`；Streamlit AppTest 检查首页、已完成 run、研究地图及系统对比，无异常。数据核对使用本地演示 run `20261114T072400Z-budgetlab-21f9e4`，非正式成绩。
+- 问题：当前没有可评测的 holdout 记录，故该面板尚未用真实 holdout 分数验收；参考图中与本项目无关的模型参数和示例统计量没有照搬。
+- 下一步：用浏览器核对窄屏与实际视觉效果；待正式结果产生后检查最终评测卡。A 的开放式协议与问答 Agent 到位后接入对话入口。
+
 ### 2026-11-14 约 16:50–17:20 · yirran（协调人）+ Claude Code，分支 `c/pre-freeze-fixes`（代 D 接 LLM 路径，协调人要求）
 - 做了：① 侧边栏加"使用 LLM"开关：`.env` 有 `LLM_MODEL`、`LLM_API_KEY` 且装了 llm 依赖时默认打开，否则灰掉并说明原因（兜底路径不变）。开跑时 `--proposer llm`，配置写到 `ui_state/configs/<task>-llm.yaml`，LLM 预算和设置直接取正式矩阵 `configs/benchmark/final.yaml` 的 overrides（新文件 `budgetlab/ui/llm.py`）。② 上传 CSV：选好目标列和正类后，可以点"让协议 Agent 起草字段可用性"，草稿预填到逐列确认表里，`questions_for_user` 逐条显示；Agent 只看开发数据的画像（C 新增 `development_profile`，和 `prepare_task` 切出的开发集逐行一致），不看 holdout。演示 CSV 同时载入标准答案时，显示 Agent 和标准答案一致几个字段、漏排除了哪些。Token 记到 `ui_state/llm_calls.jsonl`。③ 研究结束后，底部对话框变成"追问"：开放问题交给 A 的问答 Agent，回答下面列出证据引用和逐个数字的核对结果（✅/⚠️），Token 记到 `ui_state/qa_calls.jsonl`，每个会话最多 20 次请求、5 万 Token。④ 研究结束时整页刷新一次，侧边栏会显示"研究已完成"；分数保留 4 位小数；holdout 显示 95% 区间；可用特征下限从 2 改成 1（B 已修引擎）。
 - 验证：锁定环境里页面打开；LLM 开关打开时预算卡片显示 `llm`（qwen3.7-plus，最多 60 次请求、300,000 Token）；关掉后脚本化 Bank 全程跑通。新增 `tests/test_ui_llm.py`。**页面里的真实 LLM 调用还没测**（要花钱，等协调人同意）。
