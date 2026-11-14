@@ -1,0 +1,809 @@
+[
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "factor": "model_family",
+          "from": "logistic_regression",
+          "params": {
+            "learning_rate": 0.1,
+            "max_iter": 100,
+            "max_leaf_nodes": 31,
+            "min_samples_leaf": 20
+          },
+          "to": "hist_gradient_boosting"
+        },
+        {
+          "changes": {
+            "numeric_scaler": {
+              "from": "standard",
+              "to": "none"
+            }
+          },
+          "factor": "preprocessing"
+        }
+      ],
+      "scope": "single_comparison",
+      "spec": {
+        "feature_actions": [],
+        "model": {
+          "class_weight": "balanced",
+          "family": "hist_gradient_boosting",
+          "learning_rate": 0.1,
+          "max_iter": 100,
+          "max_leaf_nodes": 31,
+          "min_samples_leaf": 20
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "none",
+          "text": null
+        }
+      },
+      "spec_hash": "ab6c60b8d30b59043d7d3a566fb2cf0a99d4b774b44e94716460e35ae9dc82c7",
+      "summary": "hist_gradient_boosting(learning_rate=0.1, max_iter=100, max_leaf_nodes=31, min_samples_leaf=20) instead of logistic_regression; preprocessing: numeric_scaler standard -> none"
+    },
+    "action_key": "19419882c140",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [],
+      "requires_families": [
+        "hist_gradient_boosting"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "tool-01",
+        "delta": 0.0215176933856025,
+        "experiment_id": "r01-c2",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "candidate_pass"
+      }
+    ],
+    "lesson_id": "L-19419882c140",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule."
+    ],
+    "observed_effect": {
+      "comparator": "tool-01",
+      "delta": 0.021518,
+      "experiment_ids": [
+        "r01-c2"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "candidate",
+    "support": 1,
+    "version": 1
+  },
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "factor": "model_family",
+          "from": "logistic_regression",
+          "params": {
+            "learning_rate": 0.06,
+            "max_iter": 200,
+            "max_leaf_nodes": 63,
+            "min_samples_leaf": 50
+          },
+          "to": "hist_gradient_boosting"
+        },
+        {
+          "changes": {
+            "numeric_scaler": {
+              "from": "standard",
+              "to": "none"
+            }
+          },
+          "factor": "preprocessing"
+        },
+        {
+          "added": [
+            {
+              "columns": [
+                "pdays"
+              ],
+              "kind": "missing_indicator"
+            },
+            {
+              "columns": [
+                "pdays"
+              ],
+              "kind": "sentinel_to_missing",
+              "value": 999.0
+            }
+          ],
+          "factor": "feature_actions",
+          "removed": []
+        }
+      ],
+      "scope": "single_comparison",
+      "spec": {
+        "feature_actions": [
+          {
+            "columns": [
+              "pdays"
+            ],
+            "kind": "sentinel_to_missing",
+            "value": 999.0
+          },
+          {
+            "columns": [
+              "pdays"
+            ],
+            "kind": "missing_indicator"
+          }
+        ],
+        "model": {
+          "class_weight": null,
+          "family": "hist_gradient_boosting",
+          "learning_rate": 0.06,
+          "max_iter": 200,
+          "max_leaf_nodes": 63,
+          "min_samples_leaf": 50
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "none",
+          "text": null
+        }
+      },
+      "spec_hash": "e03760f97f11623bb6bb9ee220d4824cdb7113755851d12c6bdc03d0ba8ca146",
+      "summary": "hist_gradient_boosting(learning_rate=0.06, max_iter=200, max_leaf_nodes=63, min_samples_leaf=50) instead of logistic_regression; preprocessing: numeric_scaler standard -> none; add missing_indicator(pdays) + sentinel_to_missing(pdays=999.0)"
+    },
+    "action_key": "629ded9fddf8",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [
+        "has_missing",
+        "possible_sentinel"
+      ],
+      "requires_families": [
+        "hist_gradient_boosting"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [
+        "pdays"
+      ],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "baseline",
+        "delta": 0.006907996216981282,
+        "experiment_id": "tool-02",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "candidate_pass"
+      }
+    ],
+    "lesson_id": "L-629ded9fddf8",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule.",
+      "Feature actions name source-task columns; on new data apply them only to columns with the same property and the same prediction-time availability."
+    ],
+    "observed_effect": {
+      "comparator": "baseline",
+      "delta": 0.006908,
+      "experiment_ids": [
+        "tool-02"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "candidate",
+    "support": 1,
+    "version": 1
+  },
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "factor": "model_family",
+          "from": "logistic_regression",
+          "params": {
+            "min_samples_leaf": 5,
+            "n_estimators": 100
+          },
+          "to": "random_forest"
+        },
+        {
+          "changes": {
+            "numeric_scaler": {
+              "from": "standard",
+              "to": "none"
+            }
+          },
+          "factor": "preprocessing"
+        }
+      ],
+      "scope": "single_comparison",
+      "spec": {
+        "feature_actions": [],
+        "model": {
+          "class_weight": "balanced",
+          "family": "random_forest",
+          "max_depth": null,
+          "min_samples_leaf": 5,
+          "n_estimators": 100
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "none",
+          "text": null
+        }
+      },
+      "spec_hash": "e5f2be9528258fc61706ed3771f91d96d4d249f73b32b5941d5086b187ff7c86",
+      "summary": "random_forest(min_samples_leaf=5, n_estimators=100) instead of logistic_regression; preprocessing: numeric_scaler standard -> none"
+    },
+    "action_key": "75323ae66e2c",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [],
+      "requires_families": [
+        "random_forest"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "tool-01",
+        "delta": 0.037333912775006306,
+        "experiment_id": "r01-c1",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "candidate_pass"
+      }
+    ],
+    "lesson_id": "L-75323ae66e2c",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule."
+    ],
+    "observed_effect": {
+      "comparator": "tool-01",
+      "delta": 0.037334,
+      "experiment_ids": [
+        "r01-c1"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "candidate",
+    "support": 1,
+    "version": 1
+  },
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "factor": "model_family",
+          "from": "logistic_regression",
+          "params": {
+            "min_samples_leaf": 5,
+            "n_estimators": 100
+          },
+          "to": "random_forest"
+        },
+        {
+          "factor": "class_weight",
+          "from": null,
+          "to": "balanced"
+        },
+        {
+          "changes": {
+            "numeric_scaler": {
+              "from": "standard",
+              "to": "none"
+            }
+          },
+          "factor": "preprocessing"
+        },
+        {
+          "added": [
+            {
+              "columns": [
+                "pdays"
+              ],
+              "kind": "missing_indicator"
+            },
+            {
+              "columns": [
+                "pdays"
+              ],
+              "kind": "sentinel_to_missing",
+              "value": 999.0
+            }
+          ],
+          "factor": "feature_actions",
+          "removed": []
+        }
+      ],
+      "scope": "confirmed_recipe",
+      "spec": {
+        "feature_actions": [
+          {
+            "columns": [
+              "pdays"
+            ],
+            "kind": "sentinel_to_missing",
+            "value": 999.0
+          },
+          {
+            "columns": [
+              "pdays"
+            ],
+            "kind": "missing_indicator"
+          }
+        ],
+        "model": {
+          "class_weight": "balanced",
+          "family": "random_forest",
+          "max_depth": null,
+          "min_samples_leaf": 5,
+          "n_estimators": 100
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "none",
+          "text": null
+        }
+      },
+      "spec_hash": "f91b660b8b05e10ded319979682b0ba2be28061276914081d631e157c7f920b9",
+      "summary": "random_forest(min_samples_leaf=5, n_estimators=100) instead of logistic_regression; class_weight None -> balanced; preprocessing: numeric_scaler standard -> none; add missing_indicator(pdays) + sentinel_to_missing(pdays=999.0)"
+    },
+    "action_key": "7621e67737a5",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [
+        "has_missing",
+        "possible_sentinel"
+      ],
+      "requires_families": [
+        "random_forest"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [
+        "pdays"
+      ],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "baseline",
+        "delta": 0.06676238349068928,
+        "experiment_id": "r02-c2",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "confirmed_pass"
+      }
+    ],
+    "lesson_id": "L-7621e67737a5",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule.",
+      "Feature actions name source-task columns; on new data apply them only to columns with the same property and the same prediction-time availability."
+    ],
+    "observed_effect": {
+      "comparator": "baseline",
+      "delta": 0.066762,
+      "experiment_ids": [
+        "r02-c2"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "supported_in_sources",
+    "support": 1,
+    "version": 1
+  },
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "factor": "model_family",
+          "from": "logistic_regression",
+          "params": {
+            "learning_rate": 0.06,
+            "max_iter": 60,
+            "max_leaf_nodes": 63,
+            "min_samples_leaf": 10
+          },
+          "to": "hist_gradient_boosting"
+        },
+        {
+          "factor": "class_weight",
+          "from": null,
+          "to": "balanced"
+        },
+        {
+          "changes": {
+            "numeric_scaler": {
+              "from": "standard",
+              "to": "none"
+            }
+          },
+          "factor": "preprocessing"
+        },
+        {
+          "added": [
+            {
+              "columns": [
+                "emp.var.rate"
+              ],
+              "kind": "drop_columns"
+            }
+          ],
+          "factor": "feature_actions",
+          "removed": []
+        }
+      ],
+      "scope": "single_comparison",
+      "spec": {
+        "feature_actions": [
+          {
+            "columns": [
+              "emp.var.rate"
+            ],
+            "kind": "drop_columns"
+          }
+        ],
+        "model": {
+          "class_weight": "balanced",
+          "family": "hist_gradient_boosting",
+          "learning_rate": 0.06,
+          "max_iter": 60,
+          "max_leaf_nodes": 63,
+          "min_samples_leaf": 10
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "none",
+          "text": null
+        }
+      },
+      "spec_hash": "1874dd45c8037281628dde80ea9637bf32b9b5c2abc7c4620208635802d82dd6",
+      "summary": "hist_gradient_boosting(learning_rate=0.06, max_iter=60, max_leaf_nodes=63, min_samples_leaf=10) instead of logistic_regression; class_weight None -> balanced; preprocessing: numeric_scaler standard -> none; add drop_columns(emp.var.rate)"
+    },
+    "action_key": "84c3194e63ae",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [],
+      "requires_families": [
+        "hist_gradient_boosting"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [
+        "emp.var.rate"
+      ],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "baseline",
+        "delta": 0.05182948465353352,
+        "experiment_id": "tool-09",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "candidate_pass"
+      }
+    ],
+    "lesson_id": "L-84c3194e63ae",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule.",
+      "Feature actions name source-task columns; on new data apply them only to columns with the same property and the same prediction-time availability."
+    ],
+    "observed_effect": {
+      "comparator": "baseline",
+      "delta": 0.051829,
+      "experiment_ids": [
+        "tool-09"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "candidate",
+    "support": 1,
+    "version": 1
+  },
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "changes": {
+            "c": {
+              "from": 1.0,
+              "to": 10.0
+            }
+          },
+          "factor": "hyperparameters",
+          "family": "logistic_regression"
+        },
+        {
+          "factor": "class_weight",
+          "from": null,
+          "to": "balanced"
+        },
+        {
+          "added": [
+            {
+              "columns": [
+                "previous"
+              ],
+              "kind": "log1p"
+            }
+          ],
+          "factor": "feature_actions",
+          "removed": []
+        }
+      ],
+      "scope": "single_comparison",
+      "spec": {
+        "feature_actions": [
+          {
+            "columns": [
+              "previous"
+            ],
+            "kind": "log1p"
+          }
+        ],
+        "model": {
+          "c": 10.0,
+          "class_weight": "balanced",
+          "family": "logistic_regression",
+          "max_iter": 500
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "standard",
+          "text": null
+        }
+      },
+      "spec_hash": "03123d07b0753c80849645567176b0c0ff82ae642a71c953226774d49c7cadaa",
+      "summary": "logistic_regression: c 1.0 -> 10.0; class_weight None -> balanced; add log1p(previous)"
+    },
+    "action_key": "9f62d3eedf8e",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [
+        "skewed_numeric"
+      ],
+      "requires_families": [
+        "logistic_regression"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [
+        "previous"
+      ],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "baseline",
+        "delta": 0.030585573949887812,
+        "experiment_id": "tool-10",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "candidate_pass"
+      }
+    ],
+    "lesson_id": "L-9f62d3eedf8e",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule.",
+      "Feature actions name source-task columns; on new data apply them only to columns with the same property and the same prediction-time availability."
+    ],
+    "observed_effect": {
+      "comparator": "baseline",
+      "delta": 0.030586,
+      "experiment_ids": [
+        "tool-10"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "candidate",
+    "support": 1,
+    "version": 1
+  },
+  {
+    "action": {
+      "kind": "combined",
+      "parts": [
+        {
+          "changes": {
+            "c": {
+              "from": 1.0,
+              "to": 2.0
+            }
+          },
+          "factor": "hyperparameters",
+          "family": "logistic_regression"
+        },
+        {
+          "factor": "class_weight",
+          "from": null,
+          "to": "balanced"
+        }
+      ],
+      "scope": "single_comparison",
+      "spec": {
+        "feature_actions": [],
+        "model": {
+          "c": 2.0,
+          "class_weight": "balanced",
+          "family": "logistic_regression",
+          "max_iter": 500
+        },
+        "preprocessing": {
+          "categorical_encoder": "onehot",
+          "categorical_imputer": "most_frequent",
+          "numeric_imputer": "median",
+          "numeric_scaler": "standard",
+          "text": null
+        }
+      },
+      "spec_hash": "ea7a33bcc5726faa99e71c2a648acf29afea098d78147fc1c922499bb64bf822",
+      "summary": "logistic_regression: c 1.0 -> 2.0; class_weight None -> balanced"
+    },
+    "action_key": "db27aa56df82",
+    "conditions": {
+      "minority_rate_range": [
+        0.0,
+        0.35
+      ],
+      "primary_metric": "f1_macro",
+      "requires_column_kinds": [],
+      "requires_families": [
+        "logistic_regression"
+      ],
+      "rows_range": [
+        6590,
+        164750
+      ],
+      "source_columns": [],
+      "source_task_ids": [
+        "bank_marketing"
+      ]
+    },
+    "counterexamples": [],
+    "evidence": [
+      {
+        "comparator": "baseline",
+        "delta": 0.030320830629107176,
+        "experiment_id": "tool-01",
+        "metric": "f1_macro",
+        "min_effect": 0.002,
+        "run_id": "20261114T074219Z-budgetlab-054aa0",
+        "task_id": "bank_marketing",
+        "verdict": "candidate_pass"
+      }
+    ],
+    "lesson_id": "L-db27aa56df82",
+    "limitations": [
+      "Measured with paired same-fold development CV only; no holdout score was used.",
+      "Single source run; treat as a hypothesis to re-test, not a rule."
+    ],
+    "observed_effect": {
+      "comparator": "baseline",
+      "delta": 0.030321,
+      "experiment_ids": [
+        "tool-01"
+      ],
+      "metric": "f1_macro",
+      "min_effect": 0.002,
+      "run_id": "20261114T074219Z-budgetlab-054aa0"
+    },
+    "status": "candidate",
+    "support": 1,
+    "version": 1
+  }
+]

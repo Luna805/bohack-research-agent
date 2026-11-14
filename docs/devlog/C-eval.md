@@ -10,6 +10,18 @@
 - 下一步：…
 -->
 
+### 2026-11-14 约 15:30–16:10 · yirran（协调人，代 B 做 P1）+ Claude Code（分支 `b/memory`，未提交）
+- 做了：最小经验库 `budgetlab/memory/`，按 B 的 `B_ENGINE_IMPLEMENTATION_PLAN.md` P1 节实现：严格的 Lesson 模型、只读快照与稳定哈希（同名文件拒绝覆盖）、只从开发侧程序裁决提取经验（不读 holdout，不抄 LLM 文字）、按画像条件确定性地匹配最多 3 条、开启时把 `lessons` 放进提案上下文、`memory_usage.json` 记录每条经验被引用 / 复测的情况和裁决。默认关闭，不开时 run 的行为和产物与之前完全一致。挂钩改动：`controller.py`、`state.py`（B 的文件）、`proposers.py`（A 的文件：`build_context` 只在有经验时加 `lessons`；脚本化提案器先复测匹配到的经验）。接口写进 INTERFACES 第 6 节，配置新增 `memory:` 段（只允许 `enabled`、`snapshot` 两个键）。
+- 验证：分支已移到最新 `origin/main`（`b5d5626`，含 A、B 已合入的改动）之上，`pytest -q` 82 passed（新增 `tests/test_engine_memory.py` 7 项）；本次改动的文件 ruff check / format 通过（`runner.py` 在本机较新的 ruff 下有 1 条 UP038，main 上本来就有，不是本次引入）。Bank 开启空经验库的 run `20261114T074219Z-budgetlab-054aa0` 与之前未开启的 run `…052041Z-budgetlab-382a00` 交付、分数、实验数完全相同；`replay` 0 次 fit。
+- 迁移演示（全部为 scripted，不是 LLM，各 1 次）：用 Bank run `…074219Z-budgetlab-054aa0` 发布快照 `budgetlab/memory/snapshots/bank-v1.json`（7 条经验，1 条已确认；哈希 `d494cbac…`）。Adult 上匹配到 3 条（RF leaf=5、LR c=10 balanced、LR c=2 balanced）；Bank 上已确认的最优方案因为依赖 `pdays` 哨兵值处理，在 Adult 上没有对应性质的列，按规则跳过。
+  | Adult（f1_macro，开发集） | 交付 | 开发分数 | 确认 | 轮数 | 实验数 | 墙钟 |
+  |---|---|---|---|---|---|---|
+  | 空经验库 `…074344Z-budgetlab-6d4096` | tool-02 | 0.8147 | confirmed_pass | 4 | 8 | 156 s |
+  | bank-v1 `…075006Z-budgetlab-da98de` | tool-02 | 0.8147 | confirmed_pass | 5 | 10 | 158 s |
+  3 条都被复测：RF 经验通过基线门槛（+0.0028），但远低于最优；两条 LR balanced 经验 not_met（−0.0105），其中一条刚好已被随机搜索测过，程序直接认出是同一规格。**结论：机制跑通，这个案例里经验没有带来提升，反而多花了 2 个实验。** 最优方案在第 2 个实验（初始随机搜索）就找到了，经验没有机会再提升。
+- 问题：`proposers.py` 归 A、`controller.py`/`state.py` 归 B，合入前需要在群里告诉 A 和 B。没有真实 LLM，无法测"LLM 读到经验后是否提得更好"。正式矩阵不开经验库（配置里没有 `memory:` 段）。
+- 下一步：B review 后合入；LLM 接通后可以用 `configs/memory/adult-empty.yaml` 和 `adult-bank-v1.yaml` 做一次 LLM 版对照（`--proposer llm`），结果不论好坏都如实记录。
+
 ### 2026-11-14 约 15:35–15:50 · yirran（协调人）+ Claude Code
 - 做了：拉取并检查队友的分支。B 的 `b/engine-stability` 合入 main（`bf4cc72`，CI 通过）；A 的 `a/agent` 合入 main（真实 LLM `qwen3.7-plus`、协议 Agent、`extra_body`）。`configs/benchmark/final.yaml` 改用 A 验证过的设置（tool 模式、单次输出上限 3000、`extra_body: {enable_thinking: false}`、每个 run 60 次请求和 30 万 Token），并按 A 实测的单个 LLM run 约 15 分钟更新了耗时估算：3 次重复串行约 3.3–3.8 小时，可以按任务拆成两个进程并行。HANDOFF 待办表已同步。
 - 验证：main、A、B 模拟合并后，锁定环境 75 passed，ruff 通过；A 分支的 CI 通过。这台 Mac 上没有 `.env`，所以 `final.yaml` 的开跑前检查如实报"没有配置 LLM"。

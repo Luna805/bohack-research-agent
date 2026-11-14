@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .contracts import spec_hash
+from .memory.match import context_view
 from .schemas import (
     AddMissingIndicators,
     Candidate,
@@ -75,7 +76,7 @@ def build_context(
         head = [row for row in rows[: -(max_rows - 2)] if row["id"] in keep]
         rows = head + tail
     policy = contract.loop_policy
-    return {
+    context: dict[str, Any] = {
         "mode": mode,
         "task": {
             "title": card.get("title"),
@@ -122,6 +123,20 @@ def build_context(
             key: remaining.get(key) for key in ("experiments", "llm_requests", "llm_tokens")
         },
     }
+    if state.lessons:  # only with an enabled lesson bank; otherwise the context is unchanged
+        context["lessons"] = [context_view(lesson) for lesson in state.lessons]
+        context["lessons_note"] = LESSONS_NOTE
+        context["valid_evidence_refs"] += state.lesson_refs()
+    return context
+
+
+LESSONS_NOTE = (
+    "Lessons are program-extracted results from earlier runs (see source_tasks). They are "
+    "hints, not evidence about this task: every candidate is still trained here and judged by "
+    "decision_rule. To test a lesson, make it one candidate (adapt column names to "
+    "data_profile), compare it against an experiment listed in `experiments`, and add its "
+    "evidence_ref to evidence_refs."
+)
 
 
 PROPOSER_INSTRUCTIONS = """\
@@ -270,18 +285,46 @@ class ScriptedProposer:
             )
         return moves
 
+    def _lesson_moves(self, context: dict[str, Any]) -> list[tuple[str, ExperimentSpec, str]]:
+        """Re-test matched lessons first (only present when the lesson bank is enabled)."""
+        families = set(context["legal_space"]["model_families"])
+        columns = {row["name"] for row in context["data_profile"]}
+        moves = []
+        for lesson in context.get("lessons", []):
+            spec = ExperimentSpec.model_validate(lesson["spec"])
+            if spec.model.family not in families:
+                continue
+            kept = tuple(a for a in spec.feature_actions if set(a.columns) <= columns)
+            note = ""
+            if len(kept) < len(spec.feature_actions):
+                spec = spec.model_copy(update={"feature_actions": kept})
+                note = " without its source-only feature actions"
+            effect = lesson["observed_effect"]
+            moves.append(
+                (
+                    f"Lesson {lesson['lesson_id']}{note} ({'/'.join(lesson['source_tasks'])}: "
+                    f"{effect['delta']:+.3f} vs {effect['comparator']}) may transfer here.",
+                    spec,
+                    lesson["evidence_ref"],
+                )
+            )
+        return moves
+
     def propose(self, context: dict[str, Any]) -> CallOutcome:
         rows = {row["id"]: row for row in context["experiments"]}
         best_id = context["best_id"]
         best = ExperimentSpec.model_validate(rows[best_id]["spec"])
         seen = {spec_hash(ExperimentSpec.model_validate(row["spec"])) for row in rows.values()}
-        chosen: list[tuple[str, ExperimentSpec]] = []
-        for statement, spec in self._moves(best, context):
+        chosen: list[tuple[str, ExperimentSpec, str | None]] = []
+        moves = self._lesson_moves(context) + [
+            (statement, spec, None) for statement, spec in self._moves(best, context)
+        ]
+        for statement, spec, lesson_ref in moves:
             digest = spec_hash(spec)
             if digest in seen:
                 continue
             seen.add(digest)
-            chosen.append((statement, spec))
+            chosen.append((statement, spec, lesson_ref))
             if len(chosen) == 2:
                 break
         if len(chosen) < 2:
@@ -291,14 +334,14 @@ class ScriptedProposer:
                 candidate_id=f"s{index + 1}",
                 hypothesis=Hypothesis(
                     statement=statement,
-                    evidence_refs=(best_id, "eda"),
+                    evidence_refs=(best_id, "eda", *((lesson_ref,) if lesson_ref else ())),
                     comparator_experiment_id=best_id,
                     decision_policy_id="practical_gain_v2",
                     proposed_change=json.dumps(spec.model.model_dump(mode="json"))[:200],
                 ),
                 experiment=spec,
             )
-            for index, (statement, spec) in enumerate(chosen)
+            for index, (statement, spec, lesson_ref) in enumerate(chosen)
         )
         batch = ProposalBatch(
             previous_result_interpretation=f"Current best is {best_id}.",

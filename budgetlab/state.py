@@ -129,6 +129,11 @@ class ResearchState:
     stop_reason: str | None = None
     duplicates_blocked: int = 0
     invalid_rejected: int = 0
+    lessons: list[dict[str, Any]] = field(default_factory=list)
+
+    def lesson_refs(self) -> list[str]:
+        """Evidence refs a proposal may cite for lessons matched before the contract froze."""
+        return [f"lesson:{lesson['lesson_id']}" for lesson in self.lessons]
 
     def __post_init__(self) -> None:
         self.experiments.append(self.baseline)

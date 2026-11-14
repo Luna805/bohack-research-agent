@@ -44,6 +44,7 @@ from .data import (
 )
 from .evaluator import calibrate, evaluate_candidate, evaluate_confirmation
 from .ledger import EventLedger, atomic_write_json, utc_now
+from .memory import MemorySettings, extract_run, lesson_usage, match_lessons, snapshot_hash
 from .pipeline import build_pipeline
 from .profile import profile_development
 from .proposers import (
@@ -204,6 +205,9 @@ def setup_run(
 ) -> tuple[RunContext, ResearchState]:
     if system not in SYSTEMS:
         raise ValueError(f"unsupported research system: {system}; choose from {SYSTEMS}")
+    memory = MemorySettings(config)
+    snapshot, snapshot_ref = memory.load(PROJECT_ROOT)  # fails before any run dir exists
+    memory_hash = snapshot_hash(snapshot)
     started = time.monotonic()
     run_id = make_run_id(system)
     run_dir = runs_root / run_id
@@ -241,6 +245,31 @@ def setup_run(
     profile = profile_development(bundle.features, bundle.target, card, protocol.text_columns)
     atomic_write_json(run_dir / "eda.json", profile)
     ledger.append("profile_written", artifact_ref="eda.json")
+    lessons: list[dict[str, Any]] = []
+    if memory.enabled:
+        lessons = match_lessons(
+            profile,
+            card,
+            snapshot,
+            primary_metric=protocol.primary_metric,
+            allowed_families=protocol.allowed_model_families,
+        )
+        memory_record = {
+            "enabled": True,
+            "snapshot_ref": snapshot_ref,
+            "snapshot_hash": memory_hash,
+            "snapshot_lessons": len(snapshot),
+            "matched_lesson_ids": [lesson["lesson_id"] for lesson in lessons],
+        }
+        atomic_write_json(run_dir / "memory_retrieved.json", {**memory_record, "lessons": lessons})
+        run_config_path = run_dir / "run_config.json"
+        run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
+        atomic_write_json(run_config_path, {**run_config, "memory": memory_record})
+        ledger.append(
+            "memory_matched",
+            artifact_ref="memory_retrieved.json",
+            details={"snapshot_hash": memory_hash, "matched": memory_record["matched_lesson_ids"]},
+        )
     seeds = (
         protocol.split_seed,
         *protocol.calibration_split_seeds,
@@ -282,7 +311,7 @@ def setup_run(
         protocol,
         calibration,
         split_manifest_hash=manifest_hash,
-        memory_snapshot_hash=stable_hash([]),
+        memory_snapshot_hash=memory_hash,
     )
     atomic_write_json(run_dir / "contract.json", contract.model_dump(mode="json"))
     ledger.append("contract_frozen", artifact_ref="contract.json")
@@ -313,7 +342,9 @@ def setup_run(
         previous_best_id=None,
         elapsed_seconds=ctx.elapsed(),
     )
-    state = ResearchState(baseline=baseline_record, min_effect=contract.decision_policy.min_effect)
+    state = ResearchState(
+        baseline=baseline_record, min_effect=contract.decision_policy.min_effect, lessons=lessons
+    )
     _write_experiment(ctx, baseline_record)
     return ctx, state
 
@@ -524,7 +555,7 @@ def screen_candidates(
     ctx: RunContext, state: ResearchState, batch: ProposalBatch
 ) -> tuple[list[Candidate], list[dict[str, str]]]:
     known = set(state.known_ids())
-    allowed_refs = known | set(EVIDENCE_EXTRAS)
+    allowed_refs = known | set(EVIDENCE_EXTRAS) | set(state.lesson_refs())
     valid: list[Candidate] = []
     rejected: list[dict[str, str]] = []
     batch_hashes: set[str] = set()
@@ -906,7 +937,26 @@ def finalize(ctx: RunContext, state: ResearchState) -> dict[str, Any]:
     }
     atomic_write_json(ctx.run_dir / "delivery" / "frozen_delivery.json", delivery)
     ctx.ledger.append("delivery_frozen", artifact_ref="delivery/frozen_delivery.json")
-    return _summary(ctx, state, delivery, finalist, confirmation_status, confirmation_deltas)
+    summary = _summary(ctx, state, delivery, finalist, confirmation_status, confirmation_deltas)
+    if MemorySettings(ctx.config).enabled:
+        summary["memory"] = _write_memory_artifacts(ctx, state)
+    return summary
+
+
+def _write_memory_artifacts(ctx: RunContext, state: ResearchState) -> dict[str, Any]:
+    """Lesson draft from this run's development evidence, plus what retrieved lessons did."""
+    draft = extract_run(ctx.run_dir)
+    atomic_write_json(ctx.run_dir / "memory_draft.json", draft)
+    ctx.ledger.append("memory_draft_written", artifact_ref="memory_draft.json")
+    usage = lesson_usage(ctx.run_dir, state.lessons)
+    atomic_write_json(ctx.run_dir / "memory_usage.json", usage)
+    ctx.ledger.append("memory_usage_written", artifact_ref="memory_usage.json")
+    return {
+        "snapshot_hash": ctx.contract.memory_snapshot_hash,
+        "matched_lesson_ids": [lesson["lesson_id"] for lesson in state.lessons],
+        "usage": {key: usage[key] for key in ("retrieved", "cited", "tested", "helpful")},
+        "draft_lessons": len(draft["lessons"]),
+    }
 
 
 def _summary(
